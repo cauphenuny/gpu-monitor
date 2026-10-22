@@ -59,7 +59,8 @@ button:active{transform:translateY(1px)}
 button:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(122,179,255,.25)}
 #updated{color:var(--faint);font-size:12px;min-width:100px;font-variant-numeric:tabular-nums}
 @keyframes spin{to{transform:rotate(1turn)}}
-.spin{animation:spin .9s linear infinite;pointer-events:none;opacity:.7}
+.spin{pointer-events:none;opacity:.7}
+.spin .ri{display:inline-block;animation:spin .9s linear infinite}
 #root{display:flex;flex-direction:column;gap:16px;padding:14px 22px 44px}
 .group-h{display:flex;align-items:center;gap:8px;padding:0 2px 6px;border-bottom:1px solid var(--line-soft);margin-bottom:10px}
 .gcollapse{background:none;border:none;color:var(--faint);font-size:10px;padding:2px 6px;cursor:pointer;border-radius:6px}
