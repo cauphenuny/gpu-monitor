@@ -32,6 +32,7 @@ function gpuRow(host, g){
   const open = openGpus.has(key);
   const memPct = (g.mem_total && g.mem_used != null) ? g.mem_used / g.mem_total * 100 : null;
   const n = (g.procs || []).length;
+  const spark = open ? `<div class="spark" data-spark="${esc(key)}"><div class="empty">加载历史…</div></div>` : '';
   const procs = (open && n) ? `<div class="procs">${g.procs.map(p =>
     `<div class="proc"><div class="pname">${p.container ? `<span class="pcontainer" title="${esc(p.container)}">${esc(p.container)}</span>` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span></div><div class="pmeta"><div><span class="pid">#${esc(p.pid)}</span><span class="pmem">${p.mem != null ? fmtMiB(p.mem) : ''}</span></div><div class="ptime" title="进程已运行时长（截至本次采集）">已运行 ${fmtDuration(p.elapsed_seconds)}</div></div></div>`).join('')}</div>` : '';
   return `<div class="gpu" data-gpu="${esc(key)}" title="点击展开/收起进程">
@@ -40,7 +41,7 @@ function gpuRow(host, g){
       <span class="gpu-side">${g.temp != null ? Math.round(g.temp)+'°C' : ''}${g.temp != null && g.power != null ? ' · ' : ''}${g.power != null ? Math.round(g.power)+'W' : ''}</span></div>
     <div class="l2"><span class="mini">利用率</span>${bar(g.util)}<span class="val ${cls(g.util)}">${fpct(g.util)}</span>
       <span class="mini">显存</span>${bar(memPct)}<span class="val wide ${cls(memPct)}">${fmtG(g.mem_used)}/${fmtG(g.mem_total)} GB</span></div>
-    ${procs}
+    ${spark}${procs}
   </div>`;
 }
 
@@ -63,6 +64,65 @@ function card(host, group){
       <button class="del" data-del-host="${esc(host)}" data-del-group="${esc(group)}" title="移除">✕</button></div>
     ${ban != null ? `<div class="ban" title="${esc(ban)}">⛔ 暂停使用：${esc(ban)}</div>` : ''}
     ${body}</section>`;
+}
+
+
+/* ---- 历史曲线: 服务端内存里保留最近 2 小时, 展开某张卡时按主机拉取 ---- */
+const histCache = new Map();   // host → {ts, gpus: {gpuKey: [[ts, util%, mem%], …]}}
+const histPending = new Set();
+const HIST_TTL = 15000;
+
+function sparkSVG(pts){
+  if (!pts || pts.length < 2) return '<div class="empty">历史点过少，稍后再看</div>';
+  const W = 100, H = 26, pad = 1;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0], span = t1 - t0 || 1;
+  const x = t => (t - t0) / span * (W - pad * 2) + pad;
+  const y = v => H - pad - (v / 100) * (H - pad * 2);
+  const line = idx => {
+    let out = '', run = [];
+    const flush = () => { if (run.length > 1) out += `<polyline points="${run.map(([px, py]) => px.toFixed(1) + ',' + py.toFixed(1)).join(' ')}"/>`; run = []; };
+    for (const p of pts){ const v = p[idx]; if (v == null){ flush(); continue; } run.push([x(p[0]), Math.min(H - pad, Math.max(pad, y(v)))]); }
+    flush();
+    return out;
+  };
+  const last = idx => { for (let i = pts.length - 1; i >= 0; i--) if (pts[i][idx] != null) return pts[i][idx]; return null; };
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="历史曲线">
+    <line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="#1f2836" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <g fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">
+      <g stroke="#7ab3ff">${line(1)}</g>
+      <g stroke="#a78bfa">${line(2)}</g>
+    </g></svg>
+    <div class="sl"><span><i style="background:#7ab3ff"></i>利用率 ${last(1) == null ? '--' : Math.round(last(1)) + '%'}</span>
+      <span><i style="background:#a78bfa"></i>显存 ${last(2) == null ? '--' : Math.round(last(2)) + '%'}</span>
+      <span class="slage">近 ${histSpan(pts)}</span></div>`;
+}
+function histSpan(pts){
+  const m = (pts[pts.length - 1][0] - pts[0][0]) / 60;
+  return m >= 60 ? Math.round(m / 60) + ' 小时' : Math.max(1, Math.round(m)) + ' 分钟';
+}
+function drawSparks(host){
+  const c = histCache.get(host);
+  if (!c) return;
+  for (const el of document.querySelectorAll('.spark')){
+    if (!el.dataset.spark.startsWith(host + '|')) continue;
+    el.innerHTML = sparkSVG(c.gpus[el.dataset.spark.slice(host.length + 1)]);
+  }
+}
+async function hydrateSparks(){
+  const hosts = new Set();
+  for (const k of openGpus) hosts.add(k.slice(0, k.lastIndexOf('|')));
+  for (const host of hosts){
+    const c = histCache.get(host);
+    if (c && Date.now() - c.ts < HIST_TTL) drawSparks(host);
+    else if (!histPending.has(host)){
+      histPending.add(host);
+      fetch('/api/history?host=' + encodeURIComponent(host))
+        .then(r => r.json())
+        .then(d => { histCache.set(host, {ts: Date.now(), gpus: d.gpus || {}}); drawSparks(host); })
+        .catch(() => {})
+        .finally(() => histPending.delete(host));
+    }
+  }
 }
 
 function tally(hostList){
@@ -141,6 +201,7 @@ function render(){
       <div class="grid">${sortedHosts(list).map(h => card(h, g)).join('')}</div>
     </section>`;
   }).join('');
+  hydrateSparks();
   const all = [...new Set(entries.map(e => e.host))];
   const t = tally(all);
   $('#summary').textContent = `${t.online}/${all.length} 主机在线 · ${t.total} GPU · ${t.busy} 忙 · ${t.idle} 闲`;

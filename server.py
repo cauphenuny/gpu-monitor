@@ -272,6 +272,49 @@ def collect_host(host):
     return res
 
 
+HISTORY_SECONDS = 2 * 3600   # 内存里保留的历史时长; 服务重启即清空
+_history = {}                # host → {gpu_key: [[ts, util%, mem%], ...]}
+_history_lock = threading.Lock()
+
+
+def _record_history(host, gpus):
+    cutoff = time.time() - HISTORY_SECONDS
+    with _history_lock:
+        per_host = _history.setdefault(host, {})
+        live = set()
+        for g in gpus:
+            key = str(g.get("uuid") or g.get("index"))
+            live.add(key)
+            mem_pct = (g["mem_used"] / g["mem_total"] * 100) if g.get("mem_total") else None
+            pts = per_host.setdefault(key, [])
+            pts.append([round(time.time(), 1), g.get("util"), None if mem_pct is None else round(mem_pct, 1)])
+            while pts and pts[0][0] < cutoff:
+                pts.pop(0)
+        for key in list(per_host):   # 卡下架后不再记录
+            if key not in live:
+                del per_host[key]
+
+
+def gpu_history(host, minutes=None, max_points=180):
+    with _history_lock:
+        per_host = _history.get(host) or {}
+        data = {k: list(v) for k, v in per_host.items()}
+    if minutes:   # 只回给定窗口; 超出 max_points 时按时间桶取平均降采样
+        cutoff = time.time() - minutes * 60
+        data = {k: [pt for pt in v if pt[0] >= cutoff] for k, v in data.items()}
+    out = {}
+    for key, pts in data.items():
+        if len(pts) > max_points:
+            step = len(pts) / max_points
+            buckets = [pts[int(i * step):int((i + 1) * step)] for i in range(max_points)]
+            pts = [[round(b[len(b)//2][0], 1),
+                    round(sum(x[1] for x in b if x[1] is not None) / max(1, sum(1 for x in b if x[1] is not None)), 1) if any(x[1] is not None for x in b) else None,
+                    round(sum(x[2] for x in b if x[2] is not None) / max(1, sum(1 for x in b if x[2] is not None)), 1) if any(x[2] is not None for x in b) else None,
+                    ] for b in buckets if b]
+        out[key] = pts
+    return out
+
+
 _last_ok = {}  # ponytail: 仅存内存, 服务重启/命令行单次查询时没有旧数据可回退; 需要时落盘
 
 
@@ -280,6 +323,7 @@ def query_host(host):
     res = collect_host(host)
     if res["ok"]:
         _last_ok[host] = res
+        _record_history(host, res["gpus"])
         return {**res, "stale": False, "data_age_seconds": 0}
     last = _last_ok.get(host)
     if last is None:
@@ -382,6 +426,16 @@ class Handler(BaseHTTPRequestHandler):
             out = query_group(qs.get("group", [None])[0],
                               brief=qs.get("brief", ["0"])[0].lower() in ("1", "true", "yes"))
             self._json(out, 200 if out["ok"] else 404)
+        elif path == "/api/history":
+            qs = urllib.parse.parse_qs(parsed.query)
+            host = (qs.get("host") or [""])[0].strip()
+            try:
+                minutes = float((qs.get("minutes") or [""])[0])
+            except ValueError:
+                minutes = 0
+            if not any(e["host"] == host for e in load_entries()):
+                return self._json({"error": "主机未配置"}, 400)
+            self._json({"host": host, "gpus": gpu_history(host, minutes or None)})
         else:
             self._json({"error": "not found"}, 404)
 
