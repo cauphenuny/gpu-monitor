@@ -1,0 +1,498 @@
+#!/usr/bin/env python3
+"""gpu-monitor — 网页集中查看多台主机 NVIDIA GPU 的利用率/显存占用.
+
+    python3 server.py [--bind 127.0.0.1] [--port 8799]
+
+浏览器打开 http://127.0.0.1:8799,在页面上增删主机(可分组);服务端通过本机
+ssh (支持 ~/.ssh/config 别名与密钥) 到各主机并行执行 nvidia-smi 并汇总返回。
+配置持久化在同目录 hosts.json ({"hosts": [{"host":..,"group":..},..]},
+兼容旧版纯主机名列表,读取时自动迁移)。仅依赖 Python3 标准库。
+"""
+
+import argparse
+import csv
+import io
+import json
+import re
+import secrets
+import shlex
+import subprocess
+import threading
+import time
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+INDEX = ROOT / "index.html"
+CONFIG_FILE = ROOT / "hosts.json"
+CLEAR_TOKEN = secrets.token_urlsafe(32)
+
+GPU_FIELDS = "index,uuid,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw"
+PROC_FIELDS = "gpu_uuid,pid,process_name,used_memory"
+REMOTE_CMD = rf"""
+nvidia-smi --query-gpu={GPU_FIELDS} --format=csv,noheader,nounits
+echo __GPUMON_P__
+gpumon_procs=$(nvidia-smi --query-compute-apps={PROC_FIELDS} --format=csv,noheader,nounits) || exit $?
+printf '%s\n' "$gpumon_procs"
+echo __GPUMON_D__
+timeout 3s docker ps --no-trunc --format '{{{{.ID}}}} {{{{.Names}}}}' 2>/dev/null || true
+echo __GPUMON_C__
+gpumon_pids=$(printf '%s\n' "$gpumon_procs" | awk -F, '$2 ~ /^[[:space:]]*[0-9]+[[:space:]]*$/ {{gsub(/[[:space:]]/, "", $2); print $2}}' | sort -u)
+printf '%s\n' "$gpumon_pids" | while read -r gpumon_pid; do
+    [ -n "$gpumon_pid" ] || continue
+    sed "s/^/$gpumon_pid /" "/proc/$gpumon_pid/cgroup" 2>/dev/null || true
+done
+echo __GPUMON_E__
+if [ -n "$gpumon_pids" ]; then
+    ps -p "$(printf '%s\n' "$gpumon_pids" | paste -sd, -)" -o pid=,etimes= 2>/dev/null || true
+fi
+"""
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-o", "StrictHostKeyChecking=accept-new"]
+SSH_TIMEOUT = 25
+
+CLEAR_CMD = "python3 -c " + shlex.quote(r'''
+import json
+import os
+import signal
+import subprocess
+import time
+import xml.etree.ElementTree as ET
+
+result = {"ok": False, "killed": [], "failed": [], "remaining": [], "error": None}
+handles = {}
+
+def gpu_pids():
+    output = subprocess.run(["nvidia-smi", "-q", "-x"], capture_output=True,
+                            text=True, check=True, timeout=10)
+    pids = set()
+    for proc in ET.fromstring(output.stdout).findall("./gpu/processes/process_info"):
+        pid = (proc.findtext("pid") or "").strip()
+        if not pid.isascii() or not pid.isdigit() or int(pid) <= 1:
+            raise ValueError("GPU 进程 PID 无效，清空已停止")
+        pids.add(int(pid))
+    return pids
+
+try:
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        raise RuntimeError("清空需要 Linux 和 Python 3.9+ 的 pidfd 支持")
+    for pid in sorted(gpu_pids()):
+        try:
+            handles[pid] = os.pidfd_open(pid)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            result["failed"].append({"pid": pid, "error": str(exc)})
+    # Pin process identities, then recheck GPU membership before sending signals.
+    current = gpu_pids() if handles else set()
+    for pid, handle in handles.items():
+        if pid not in current:
+            continue
+        try:
+            signal.pidfd_send_signal(handle, signal.SIGKILL)
+            result["killed"].append(pid)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            result["failed"].append({"pid": pid, "error": str(exc)})
+    deadline = time.monotonic() + 180
+    result["remaining"] = sorted(gpu_pids())
+    while result["killed"] and result["remaining"] and time.monotonic() < deadline:
+        time.sleep(min(5, max(0, deadline - time.monotonic())))
+        result["remaining"] = sorted(gpu_pids())
+    result["ok"] = not result["failed"] and not result["remaining"]
+except Exception as exc:
+    result["error"] = str(exc)
+finally:
+    for handle in handles.values():
+        os.close(handle)
+print(json.dumps(result))
+''')
+
+_lock = threading.Lock()
+
+
+def _read_config():
+    try:
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_config(data):
+    CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def load_entries():
+    """读取主机配置 → [{"host": str, "group": str}]; 兼容旧版纯字符串列表格式."""
+    with _lock:
+        hosts = _read_config().get("hosts", [])
+    entries = []
+    if isinstance(hosts, list):
+        for h in hosts:
+            if isinstance(h, str) and h.strip():
+                entries.append({"host": h.strip(), "group": ""})
+            elif isinstance(h, dict) and str(h.get("host", "")).strip():
+                entries.append({"host": str(h["host"]).strip(), "group": str(h.get("group", "")).strip()})
+    return entries
+
+
+def save_entries(entries):
+    with _lock:
+        data = _read_config()
+        data["hosts"] = entries
+        _write_config(data)
+
+
+def load_disabled():
+    """临时禁用的机器 → {host: 原因}; 按机器而非分组记录."""
+    with _lock:
+        d = _read_config().get("disabled")
+    return {str(k): str(v) for k, v in d.items()} if isinstance(d, dict) else {}
+
+
+def set_disabled(host, reason):
+    """reason 为 None 表示解除禁用."""
+    with _lock:
+        data = _read_config()
+        d = data.get("disabled") if isinstance(data.get("disabled"), dict) else {}
+        if reason is None:
+            d.pop(host, None)
+        else:
+            d[host] = reason
+        data["disabled"] = d
+        _write_config(data)
+    return d
+
+
+def _num(s):
+    if s is None:
+        return None
+    s = s.strip().rstrip("%")
+    if not s or s.startswith("["):  # "[N/A]" / "[Not Supported]"
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_nvidia_output(text):
+    """解析 REMOTE_CMD 的输出 → (gpus, procs, uuid到gpu的映射)."""
+    gpu_text, _, tail = text.partition("__GPUMON_P__")
+    proc_text, _, tail = tail.partition("__GPUMON_D__")
+    docker_text, _, cgroup_text = tail.partition("__GPUMON_C__")
+    cgroup_text, _, elapsed_text = cgroup_text.partition("__GPUMON_E__")
+    pid_to_elapsed = {}
+    for line in elapsed_text.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and all(field.isascii() and field.isdigit() for field in fields):
+            pid_to_elapsed[fields[0]] = int(fields[1])
+    container_names = {}
+    for line in docker_text.splitlines():
+        container_id, _, name = line.strip().partition(" ")
+        if container_id and name:
+            container_names[container_id] = name.strip()
+    pid_to_container = {}
+    for line in cgroup_text.splitlines():
+        pid, _, cgroup = line.partition(" ")
+        if not pid.isdigit():
+            continue
+        path = cgroup.split(":", 2)[-1]
+        for container_id in re.findall(r"(?:^|/)(?:docker-)?([0-9a-f]{64})(?=\.scope(?:/|$)|/|$)", path):
+            if container_id in container_names:
+                pid_to_container[pid] = container_names[container_id]
+    gpus, uuid_to_gpu = [], {}
+    for row in csv.reader(io.StringIO(gpu_text)):
+        row = [c.strip() for c in row]
+        if len(row) < 6 or not row[0].isdigit():
+            continue
+        gpu = {
+            "index": int(row[0]),
+            "uuid": row[1],
+            "name": row[2],
+            "util": _num(row[3]) if len(row) > 3 else None,
+            "mem_used": _num(row[4]) if len(row) > 4 else None,
+            "mem_total": _num(row[5]) if len(row) > 5 else None,
+            "temp": _num(row[6]) if len(row) > 6 else None,
+            "power": _num(row[7]) if len(row) > 7 else None,
+            "procs": [],
+        }
+        gpus.append(gpu)
+        if gpu["uuid"]:
+            uuid_to_gpu[gpu["uuid"]] = gpu
+    procs = []
+    for row in csv.reader(io.StringIO(proc_text)):
+        row = [c.strip() for c in row]
+        if len(row) < 4:
+            continue
+        procs.append({"gpu_uuid": row[0], "pid": row[1], "name": row[2], "mem": _num(row[3]),
+                      "container": pid_to_container.get(row[1]),
+                      "elapsed_seconds": pid_to_elapsed.get(row[1])})
+    return gpus, procs, uuid_to_gpu
+
+
+def collect_host(host):
+    started = time.time()
+    res = {"host": host, "ok": False, "error": None, "latency_ms": None, "ts": started, "gpus": []}
+    try:
+        proc = subprocess.run(
+            ["ssh", *SSH_OPTS, host, REMOTE_CMD],
+            capture_output=True, text=True, timeout=SSH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        res["error"] = "ssh 超时 (>%ds)" % SSH_TIMEOUT
+        return res
+    except FileNotFoundError:
+        res["error"] = "本机未安装 ssh 命令"
+        return res
+    res["latency_ms"] = round((time.time() - started) * 1000)
+    if proc.returncode != 0:  # ssh 本身失败: 网络不通 / 未配置免密 / 未知主机等
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        res["error"] = lines[-1].strip() if lines else "ssh 退出码 %d" % proc.returncode
+        return res
+    gpus, procs, uuid_to_gpu = parse_nvidia_output(proc.stdout)
+    if not gpus:
+        lines = (proc.stderr or "").strip().splitlines()
+        if lines:  # 如 "nvidia-smi: command not found" / "No devices were found"
+            res["error"] = lines[-1].strip()
+            return res
+    for p in procs:
+        g = uuid_to_gpu.get(p["gpu_uuid"])
+        if g is not None:
+            g["procs"].append(p)
+    res["ok"] = True
+    res["gpus"] = gpus
+    return res
+
+
+_last_ok = {}  # ponytail: 仅存内存, 服务重启/命令行单次查询时没有旧数据可回退; 需要时落盘
+
+
+def query_host(host):
+    """查询失败时回退到该主机上一次成功的数据, 用 stale/data_age_seconds 标注数据有多旧."""
+    res = collect_host(host)
+    if res["ok"]:
+        _last_ok[host] = res
+        return {**res, "stale": False, "data_age_seconds": 0}
+    last = _last_ok.get(host)
+    if last is None:
+        return {**res, "stale": False, "data_age_seconds": None}
+    return {**last, "ok": False, "error": res["error"], "latency_ms": res["latency_ms"],
+            "stale": True, "data_age_seconds": round(time.time() - last["ts"])}
+
+
+def query_all(hosts):
+    hosts = list(dict.fromkeys(hosts))  # 同一主机可能在多个分组, 只查一次
+    if not hosts:
+        return []
+    with ThreadPoolExecutor(max_workers=min(16, len(hosts))) as ex:
+        return list(ex.map(query_host, hosts))
+
+
+def brief_result(r):
+    """精简结果: 每张卡只保留显存占用和占用显存的容器名 (去重, 不在容器里的进程不列出)."""
+    return {"host": r["host"], "ok": r["ok"], "error": r["error"], "stale": r["stale"],
+            "data_age_seconds": r["data_age_seconds"], "disabled": r.get("disabled"),
+            "gpus": [{"index": g["index"], "mem_used": g["mem_used"], "mem_total": g["mem_total"],
+                      "containers": list(dict.fromkeys(p["container"] for p in g["procs"] if p["container"]))}
+                     for g in r["gpus"]]}
+
+
+def query_group(group=None, brief=False):
+    """按分组查询 (忽略大小写, None 为全部) → 可直接 json 输出的 dict; 分组不存在时返回 error 和可选分组."""
+    entries = load_entries()
+    if group is not None:
+        groups = list(dict.fromkeys(e["group"] for e in entries))
+        entries = [e for e in entries if e["group"].casefold() == group.casefold()]
+        if not entries:
+            return {"ok": False, "error": "分组不存在: %s" % group, "groups": groups}
+    disabled = load_disabled()
+    results = [{**r, "disabled": disabled.get(r["host"])} for r in query_all([e["host"] for e in entries])]
+    return {"ok": True, "ts": time.time(), "group": group,
+            "results": [brief_result(r) for r in results] if brief else results}
+
+
+def clear_host(host):
+    try:
+        proc = subprocess.run(["ssh", *SSH_OPTS, "--", host, CLEAR_CMD],
+                              capture_output=True, text=True, timeout=240)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "清空查询超时，部分任务可能已终止，请刷新确认"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "本机未安装 ssh 命令"}
+    if proc.returncode != 0:
+        return {"ok": False, "error": (proc.stderr or proc.stdout or "ssh 执行失败").strip()}
+    try:
+        result = json.loads(proc.stdout)
+        if not isinstance(result, dict) or "ok" not in result:
+            raise ValueError()
+        return result
+    except ValueError:
+        return {"ok": False, "error": "清空结果无法解析，部分任务可能已终止，请刷新确认"}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):  # 安静模式, 刷新频繁不刷屏
+        pass
+
+    def _json(self, obj, code=200):
+        data = json.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n:
+            try:
+                return json.loads(self.rfile.read(n))
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path == "/":
+            try:
+                data = INDEX.read_bytes().replace(b"__GPUMON_CLEAR_TOKEN__", CLEAR_TOKEN.encode())
+            except FileNotFoundError:
+                return self._json({"error": "index.html 缺失"}, 500)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif path == "/api/hosts":
+            self._json({"hosts": load_entries(), "disabled": load_disabled()})
+        elif path == "/api/status":
+            qs = urllib.parse.parse_qs(parsed.query)
+            out = query_group(qs.get("group", [None])[0],
+                              brief=qs.get("brief", ["0"])[0].lower() in ("1", "true", "yes"))
+            self._json(out, 200 if out["ok"] else 404)
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/api/hosts/clear":
+            if self.headers.get_content_type() != "application/json":
+                return self._json({"ok": False, "error": "清空请求格式错误，请刷新页面后重试"}, 400)
+            token = self.headers.get("X-GPUMon-Token", "").encode()
+            if not secrets.compare_digest(token, CLEAR_TOKEN.encode()):
+                return self._json({"ok": False, "error": "清空校验失败，请刷新页面后重试"}, 403)
+            body = self._body()
+            if not isinstance(body, dict):
+                return self._json({"ok": False, "error": "请求必须是 JSON 对象"}, 400)
+            host = body.get("host")
+            if (not isinstance(host, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@:%\[\]-]*", host)
+                    or not any(e["host"] == host for e in load_entries())):
+                return self._json({"ok": False, "error": "服务器未配置或名字无效"}, 400)
+            if body.get("confirmation") != host:
+                return self._json({"ok": False, "error": "输入的服务器名不匹配，未执行清空"}, 400)
+            self._json(clear_host(host))
+        elif path == "/api/hosts/disable":
+            body = self._body()
+            host = str(body.get("host", "")).strip() if isinstance(body, dict) else ""
+            if not host:
+                return self._json({"error": "host 不能为空"}, 400)
+            if body.get("disabled", True):
+                reason = str(body.get("reason") or "").strip() or "未注明原因"
+                self._json({"disabled": set_disabled(host, reason)})
+            else:
+                self._json({"disabled": set_disabled(host, None)})
+        elif path == "/api/hosts":
+            body = self._body()
+            host = str(body.get("host", "")).strip()
+            group = str(body.get("group", "")).strip()
+            if not host:
+                return self._json({"error": "host 不能为空"}, 400)
+            entries = load_entries()
+            if not any(e["host"] == host and e["group"] == group for e in entries):
+                entries.append({"host": host, "group": group})
+                save_entries(entries)
+            self._json({"hosts": entries})
+        elif path == "/api/hosts/reorder":
+            items = self._body().get("hosts")
+            if not isinstance(items, list):
+                return self._json({"error": "hosts 必须是列表"}, 400)
+            entries, seen = [], set()
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                host = str(it.get("host", "")).strip()
+                group = str(it.get("group", "")).strip()
+                if host and (group, host) not in seen:
+                    seen.add((group, host))
+                    entries.append({"host": host, "group": group})
+            save_entries(entries)  # 整表按客户端给出的顺序覆盖保存
+            self._json({"hosts": entries})
+        elif path == "/api/groups/rename":
+            body = self._body()
+            src = str(body.get("from", "")).strip()
+            dst = str(body.get("to", "")).strip()
+            if not src or not dst or src == dst:
+                return self._json({"hosts": load_entries()})
+            entries = [{"host": e["host"], "group": dst if e["group"] == src else e["group"]}
+                       for e in load_entries()]
+            seen, merged = set(), []
+            for e in entries:  # 重名分组合并后可能出现重复主机, 去重
+                key = (e["group"], e["host"])
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(e)
+            save_entries(merged)
+            self._json({"hosts": merged})
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == "/api/hosts":
+            host = (qs.get("host") or [""])[0].strip()
+            group = (qs.get("group") or [""])[0].strip()
+            entries = [e for e in load_entries() if not (e["host"] == host and e["group"] == group)]
+            save_entries(entries)
+            self._json({"hosts": entries})
+        elif parsed.path == "/api/groups":
+            group = (qs.get("group") or [""])[0].strip()
+            entries = [e for e in load_entries() if e["group"] != group]
+            save_entries(entries)
+            self._json({"hosts": entries})
+        else:
+            self._json({"error": "not found"}, 404)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="GPU 监控网页")
+    ap.add_argument("--bind", default="127.0.0.1", help="监听地址 (默认 127.0.0.1, 仅本机可访问)")
+    ap.add_argument("--port", type=int, default=8799)
+    sub = ap.add_subparsers(dest="cmd")
+    q = sub.add_parser("query", help="直接查询 GPU 状态并输出 JSON (供 agent/脚本调用), 不启动服务")
+    q.add_argument("group", nargs="?", help="分组名 (如 H200, 忽略大小写); 省略则查询全部主机")
+    q.add_argument("--brief", action="store_true", help="每张卡只返回显存占用和占用显存的容器名")
+    args = ap.parse_args()
+    if args.cmd == "query":
+        out = query_group(args.group, args.brief)
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        raise SystemExit(0 if out["ok"] else 1)
+    srv = ThreadingHTTPServer((args.bind, args.port), Handler)
+    shown = args.bind if args.bind not in ("0.0.0.0", "::") else "127.0.0.1"
+    print("GPU Monitor 已启动: http://%s:%d  (Ctrl+C 退出)" % (shown, args.port))
+    print("提示: 在网页中添加的主机需可免密 ssh 登录 (ssh <host> 不提示输密码), 且装有 nvidia-smi")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\n已停止")
+
+
+if __name__ == "__main__":
+    main()
