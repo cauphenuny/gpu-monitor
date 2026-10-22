@@ -2,7 +2,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
 
-const script = fs.readFileSync(`${__dirname}/index.html`, 'utf8').split('<script>')[1].split('</script>')[0];
+const script = fs.readFileSync(`${__dirname}/app.js`, 'utf8');
 new vm.Script(script);
 const context = vm.createContext({localStorage: {getItem: () => null}});
 vm.runInContext(script.split('function card(')[0] + `

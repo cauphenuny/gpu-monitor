@@ -79,5 +79,7 @@ python3 server.py query H200 --brief   # 精简输出, HTTP 等价于 /api/statu
 ## 文件
 
 - `server.py` — HTTP 服务 + ssh 采集
-- `index.html` — 单文件前端，无构建依赖
+- `index.html` — 页面结构
+- `style.css` — 样式（深色主题）
+- `app.js` — 前端逻辑，无构建依赖
 - `hosts.json` — 运行后自动生成的主机/分组配置

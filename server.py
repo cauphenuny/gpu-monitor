@@ -25,7 +25,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-INDEX = ROOT / "index.html"
+STATIC = {  # URL → (文件, Content-Type)
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+}
 CONFIG_FILE = ROOT / "hosts.json"
 CLEAR_TOKEN = secrets.token_urlsafe(32)
 
@@ -359,13 +363,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-        if path == "/":
+        if path in STATIC:
+            name, ctype = STATIC[path]
             try:
-                data = INDEX.read_bytes().replace(b"__GPUMON_CLEAR_TOKEN__", CLEAR_TOKEN.encode())
+                data = (ROOT / name).read_bytes().replace(b"__GPUMON_CLEAR_TOKEN__", CLEAR_TOKEN.encode())
             except FileNotFoundError:
-                return self._json({"error": "index.html 缺失"}, 500)
+                return self._json({"error": name + " 缺失"}, 500)
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", ctype)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
