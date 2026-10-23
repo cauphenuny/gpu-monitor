@@ -48,7 +48,11 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
       ${input ? `<input class="dlg-i" name="value" value="${esc(value)}" spellcheck="false" autocomplete="off">` : ''}
       <div class="dlg-a">${cancel ? '<button type="button" class="ghost" data-no>取消</button>' : ''}
         <button type="button" class="${danger ? 'danger' : 'primary'}" data-yes>${esc(ok)}</button></div>`;
-    const done = v => { if (dlg.open) dlg.close(); resolve(v); };
+    const done = v => {
+      if (!dlg.open) return resolve(v);
+      dlg.classList.add('out');
+      setTimeout(() => { dlg.close(); resolve(v); }, 180);
+    };
     const val = () => input ? dlg.querySelector('.dlg-i').value : true;
     dlg.querySelector('[data-no]')?.addEventListener('click', () => done(input ? null : false));
     dlg.querySelector('[data-yes]').addEventListener('click', () => done(val()));
@@ -79,7 +83,7 @@ function gpuRow(host, g){
       <span class="gpu-side">${g.temp != null ? Math.round(g.temp)+'°C' : ''}${g.temp != null && g.power != null ? ' · ' : ''}${g.power != null ? Math.round(g.power)+'W' : ''}</span></div>
     <div class="l2"><span class="mini">利用率</span>${bar(g.util)}<span class="val ${cls(g.util)}">${fpct(g.util)}</span>
       <span class="mini">显存</span>${bar(memPct)}<span class="val wide ${cls(memPct)}">${fmtG(g.mem_used)}/${fmtG(g.mem_total)} GB</span></div>
-    ${spark}${procs}
+    <div class="gpu-body${open ? ' open' : ''}"><div class="gpu-inner">${spark}${procs}</div></div>
   </div>`;
 }
 
@@ -233,8 +237,9 @@ function sortedHosts(list){
 }
 
 function render(){
-  $('#groupList').innerHTML = [...new Set(entries.map(e => e.group).filter(Boolean))]
-    .map(g => `<option value="${esc(g)}">`).join('');
+  const groups = [...new Set(entries.map(e => e.group).filter(Boolean))];
+  $('#groupSel').classList.toggle('empty', !groups.length);
+  $('#groupSel .sel-menu').innerHTML = groups.map(g => `<button type="button" data-v="${esc(g)}">${esc(g)}</button>`).join('');
   const root = $('#root');
   if (!entries.length){
     root.innerHTML = `<div class="hint">还没有主机。在右上角输入主机名添加，例如 <code>lab-gpu-01</code> 或 <code>user@10.0.0.5</code>，可填写分组；<br>
@@ -401,8 +406,12 @@ $('#root').addEventListener('click', async e => {
   const gpu = e.target.closest('.gpu');
   if (gpu){
     const k = gpu.dataset.gpu;
-    openGpus.has(k) ? openGpus.delete(k) : openGpus.add(k);
-    render();
+    if (!openGpus.has(k)){ openGpus.add(k); render(); return; }
+    const body = gpu.querySelector('.gpu-body');
+    openGpus.delete(k);
+    if (!body || body.scrollHeight === 0){ render(); return; }
+    body.classList.remove('open');            // 先收起, 动画结束再重绘
+    setTimeout(render, 300);
   }
 });
 
@@ -527,8 +536,21 @@ sel.querySelector('.sel-menu').addEventListener('click', e => {
   setTimer(selVal());
   closeSel();
 });
-document.addEventListener('click', e => { if (!sel.contains(e.target)) closeSel(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSel(); });
+const gsel = $('#groupSel');
+const closeGsel = () => { gsel.classList.remove('open'); gsel.querySelector('.grp-btn').setAttribute('aria-expanded', 'false'); };
+gsel.querySelector('.grp-btn').addEventListener('click', () => {
+  const open = gsel.classList.toggle('open');
+  gsel.querySelector('.grp-btn').setAttribute('aria-expanded', String(open));
+});
+gsel.querySelector('.sel-menu').addEventListener('click', e => {
+  const b = e.target.closest('[data-v]');
+  if (!b) return;
+  $('#groupInput').value = b.dataset.v;
+  closeGsel();
+  $('#hostInput').focus();
+});
+document.addEventListener('click', e => { if (!sel.contains(e.target)) closeSel(); if (!gsel.contains(e.target)) closeGsel(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape'){ closeSel(); closeGsel(); } });
 setInterval(upd, 1000);
 
 (async () => {

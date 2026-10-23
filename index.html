@@ -15,8 +15,11 @@
   <div class="spacer"></div>
   <form id="addForm">
     <input id="hostInput" placeholder="主机名 / user@host" required>
-    <input id="groupInput" list="groupList" placeholder="分组 (可选)">
-    <datalist id="groupList"></datalist>
+    <div id="groupSel" class="sel grp">
+      <input id="groupInput" placeholder="分组 (可选)" autocomplete="off">
+      <button type="button" class="grp-btn" aria-label="选择已有分组" aria-haspopup="listbox"><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.8 6 7.8l3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="sel-menu" role="listbox"></div>
+    </div>
     <button type="submit">＋ 添加</button>
   </form>
   <div id="sortSeg" class="seg" title="卡片排序方式">
