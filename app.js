@@ -152,9 +152,9 @@ function sparkHTML(pts, key){
   const last = i => { for (let k = pts.length - 1; k >= 0; k--) if (pts[k][i] != null) return pts[k][i]; return null; };
   const pct = v => v == null ? '--' : Math.round(v) + '%';
   return `<div class="spark" data-spark="${esc(key)}" title="近 ${histSpan(pts)}">
+    <span class="sage">近 ${histSpan(pts)}</span>
     <div class="sp sp1">${sparkSVG(pts, 1, SPARK.util)}</div>
-    <div class="sp sp2">${sparkSVG(pts, 2, SPARK.mem)}</div>
-    <span class="sage">近 ${histSpan(pts)}</span></div>`;
+    <div class="sp sp2">${sparkSVG(pts, 2, SPARK.mem)}</div></div>`;
 }
 function histSpan(pts){
   const m = (pts[pts.length - 1][0] - pts[0][0]) / 60;
