@@ -156,6 +156,16 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(var(--accent-rgb),.2
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#232c3a;border-radius:99px;border:3px solid var(--bg)}
 ::-webkit-scrollbar-thumb:hover{background:#2f3c50}
+@media (max-width:760px){
+  header{padding:10px 14px;gap:8px 10px}
+  #summary{display:none}
+  #addForm{flex:1;min-width:0}
+  #hostInput{flex:1;width:auto;min-width:0}
+  #groupInput{width:96px}
+  #root{padding:12px 14px 40px}
+  .grid{grid-template-columns:1fr}
+  #updated{min-width:0}
+}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 .spark{display:grid;grid-template-columns:var(--cols);align-items:end;gap:6px;margin:5px 0 2px}
