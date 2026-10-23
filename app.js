@@ -154,7 +154,7 @@ function sparkSVG(pts, idx, color){
       <stop offset="0" stop-color="${color}" stop-opacity=".3"/><stop offset="1" stop-color="${color}" stop-opacity=".02"/>
     </linearGradient></defs>
     <g fill="url(#${gid})">${area}</g>
-    <g fill="none" stroke="${color}" stroke-width="1.1" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">${line}</g></svg>`;
+    <g fill="none" stroke="${color}" stroke-width="0.8" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">${line}</g></svg>`;
 }
 
 function sparkHTML(pts, key){
