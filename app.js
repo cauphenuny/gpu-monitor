@@ -6,7 +6,9 @@ let collapsedGroups = new Set(JSON.parse(localStorage.getItem('gpumon.collapsed'
 let openGpus = new Set();   // "host|uuid" → 展开该 GPU 的进程列表
 let dragInfo = null, isDragging = false;   // 手动排序模式的拖拽状态
 const clearingHosts = new Set();
-const seenCards = new Set();   // 首次出现的卡片才做入场动画, 刷新重绘不动
+const seenCards = new Set();     // 首次出现的卡片才做入场动画, 刷新重绘不动
+const revealedSparks = new Set();  // 曲线只淡入一次, 重绘不重播
+const justOpened = new Set();    // 只在刚展开的那一刻播高度动画, 之后的重绘不再重播
 const clearToken = '__GPUMON_CLEAR_TOKEN__';
 let refreshAfterClear = false;
 
@@ -74,7 +76,8 @@ function gpuRow(host, g){
   const open = openGpus.has(key);
   const memPct = (g.mem_total && g.mem_used != null) ? g.mem_used / g.mem_total * 100 : null;
   const n = (g.procs || []).length;
-  const spark = open ? `<div class="spark" data-spark="${esc(key)}"><div class="empty">加载历史…</div></div>` : '';
+  const reveal = open && !revealedSparks.has(key);
+  const spark = open ? `<div class="spark${reveal ? ' reveal' : ''}" data-spark="${esc(key)}"><div class="empty">加载历史…</div></div>` : '';
   const procs = (open && n) ? `<div class="procs">${g.procs.map(p =>
     `<div class="proc"><div class="pname">${p.container ? `<span class="pcontainer" title="${esc(p.container)}">${esc(p.container)}</span>` : ''}<span title="${esc(p.name)}">${esc(midTrunc(p.name))}</span></div><div class="pmeta"><div><span class="pid">#${esc(p.pid)}</span><span class="pmem">${p.mem != null ? fmtMiB(p.mem) : ''}</span></div><div class="ptime" title="进程已运行时长（截至本次采集）">已运行 ${fmtDuration(p.elapsed_seconds)}</div></div></div>`).join('')}</div>` : '';
   return `<div class="gpu${open ? ' open' : ''}" data-gpu="${esc(key)}" title="点击展开/收起进程">
@@ -83,7 +86,7 @@ function gpuRow(host, g){
       <span class="gpu-side">${g.temp != null ? Math.round(g.temp)+'°C' : ''}${g.temp != null && g.power != null ? ' · ' : ''}${g.power != null ? Math.round(g.power)+'W' : ''}</span></div>
     <div class="l2"><span class="mini">利用率</span>${bar(g.util)}<span class="val ${cls(g.util)}">${fpct(g.util)}</span>
       <span class="mini">显存</span>${bar(memPct)}<span class="val wide ${cls(memPct)}">${fmtG(g.mem_used)}/${fmtG(g.mem_total)} GB</span></div>
-    <div class="gpu-body${open ? ' open' : ''}"><div class="gpu-inner">${spark}${procs}</div></div>
+    <div class="gpu-body${open ? ' open' : ''}${justOpened.has(key) ? ' just' : ''}"><div class="gpu-inner">${spark}${procs}</div></div>
   </div>`;
 }
 
@@ -173,7 +176,16 @@ function drawSparks(host){
   for (const el of document.querySelectorAll('.spark')){
     if (!el.dataset.spark.startsWith(host + '|')) continue;
     const key = el.dataset.spark;
-    el.outerHTML = sparkHTML(c.gpus[key.slice(host.length + 1)], key);
+    const pts = c.gpus[key.slice(host.length + 1)];
+    const html = sparkHTML(pts, key);
+    if (!el.querySelector('.empty')){   // 已画过曲线: 直接换内容, 保留元素本身以免动画重播
+      el.querySelectorAll('.sage,.sp').forEach(x => x.remove());
+      el.insertAdjacentHTML('beforeend', html.replace(/^<div class="spark"[^>]*>|</div>$/g, ''));
+      continue;
+    }
+    const fresh = !revealedSparks.has(key);
+    el.innerHTML = html.slice(html.indexOf('>') + 1, html.lastIndexOf('</div>'));
+    if (fresh){ revealedSparks.add(key); el.classList.add('reveal'); }
   }
 }
 async function hydrateSparks(){
@@ -406,10 +418,16 @@ $('#root').addEventListener('click', async e => {
   const gpu = e.target.closest('.gpu');
   if (gpu){
     const k = gpu.dataset.gpu;
-    if (!openGpus.has(k)){ openGpus.add(k); render(); return; }
+    if (!openGpus.has(k)){
+      openGpus.add(k); justOpened.add(k);
+      render();
+      setTimeout(() => justOpened.delete(k), 400);
+      return;
+    }
     const body = gpu.querySelector('.gpu-body');
     openGpus.delete(k);
     if (!body || body.scrollHeight === 0){ render(); return; }
+    revealedSparks.delete(k);                 // 收起后再次展开时重播淡入
     body.classList.remove('open');            // 先收起, 动画结束再重绘
     setTimeout(render, 300);
   }
