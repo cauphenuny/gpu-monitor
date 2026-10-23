@@ -6,6 +6,7 @@ let collapsedGroups = new Set(JSON.parse(localStorage.getItem('gpumon.collapsed'
 let openGpus = new Set();   // "host|uuid" → 展开该 GPU 的进程列表
 let dragInfo = null, isDragging = false;   // 手动排序模式的拖拽状态
 const clearingHosts = new Set();
+const seenCards = new Set();   // 首次出现的卡片才做入场动画, 刷新重绘不动
 const clearToken = '__GPUMON_CLEAR_TOKEN__';
 let refreshAfterClear = false;
 
@@ -44,7 +45,7 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
     dlg.className = 'dlg';
     dlg.innerHTML = `<div class="dlg-t">${esc(title)}</div>
       ${desc ? `<div class="dlg-d">${esc(desc).replace(/\n/g, '<br>')}</div>` : ''}
-      ${input ? `<input class="dlg-i" value="${esc(value)}" spellcheck="false">` : ''}
+      ${input ? `<input class="dlg-i" name="value" value="${esc(value)}" spellcheck="false" autocomplete="off">` : ''}
       <div class="dlg-a">${cancel ? '<button type="button" class="ghost" data-no>取消</button>' : ''}
         <button type="button" class="${danger ? 'danger' : 'primary'}" data-yes>${esc(ok)}</button></div>`;
     const done = v => { if (dlg.open) dlg.close(); resolve(v); };
@@ -107,7 +108,9 @@ function card(host, group){
   }
   const manual = sortMode() === 'manual';
   const ban = disabled.get(host);
-  return `<section class="card${!online ? ' stale' : ''}${ban != null ? ' disabled' : ''}" draggable="${manual}" data-host="${esc(host)}" data-group="${esc(group)}">
+  const fresh = !seenCards.has(host + '|' + group);
+  if (fresh) seenCards.add(host + '|' + group);
+  return `<section class="card${fresh ? ' new' : ''}${!online ? ' stale' : ''}${ban != null ? ' disabled' : ''}" draggable="${manual}" data-host="${esc(host)}" data-group="${esc(group)}">
     <div class="card-h">${dot}<span class="host">${esc(host)}</span>${ic}${ts}
       <button type="button" class="toggle" data-toggle-host="${esc(host)}" title="${ban != null ? '解除禁用' : '临时标记为不准使用'}">${ban != null ? '启用' : '禁用'}</button>
       <button type="button" class="clear" data-clear-host="${esc(host)}" ${!r?.ok || clearingHosts.has(host) ? 'disabled' : ''} title="强制结束此服务器所有 GPU 任务，最多等待 3 分钟确认清空">${clearingHosts.has(host) ? '清空中…' : '清空'}</button>
@@ -144,7 +147,7 @@ function sparkSVG(pts, idx, color){
       <stop offset="0" stop-color="${color}" stop-opacity=".3"/><stop offset="1" stop-color="${color}" stop-opacity=".02"/>
     </linearGradient></defs>
     <g fill="url(#${gid})">${area}</g>
-    <g fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">${line}</g></svg>`;
+    <g fill="none" stroke="${color}" stroke-width="1.1" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">${line}</g></svg>`;
 }
 
 function sparkHTML(pts, key){
@@ -501,15 +504,36 @@ function setTimer(sec){
   timer = null;
   if (sec > 0) timer = setInterval(refresh, sec*1000);
 }
-$('#interval').addEventListener('change', e => {
-  localStorage.setItem('gpumon.interval', e.target.value);
-  setTimer(+e.target.value);
+/* 自绘下拉: 原生 select 无法跟随主题 */
+const sel = $('#intervalSel');
+const selVal = () => +sel.querySelector('.sel-menu .on').dataset.v;
+function setSel(v){
+  const b = [...sel.querySelectorAll('[data-v]')].find(x => x.dataset.v === String(v));
+  if (!b) return false;
+  sel.querySelectorAll('[data-v]').forEach(x => x.classList.toggle('on', x === b));
+  sel.querySelector('.sel-btn span').textContent = b.textContent;
+  return true;
+}
+function closeSel(){ sel.classList.remove('open'); sel.querySelector('.sel-btn').setAttribute('aria-expanded', 'false'); }
+sel.querySelector('.sel-btn').addEventListener('click', () => {
+  const open = sel.classList.toggle('open');
+  sel.querySelector('.sel-btn').setAttribute('aria-expanded', String(open));
 });
+sel.querySelector('.sel-menu').addEventListener('click', e => {
+  const b = e.target.closest('[data-v]');
+  if (!b) return;
+  setSel(b.dataset.v);
+  localStorage.setItem('gpumon.interval', b.dataset.v);
+  setTimer(selVal());
+  closeSel();
+});
+document.addEventListener('click', e => { if (!sel.contains(e.target)) closeSel(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSel(); });
 setInterval(upd, 1000);
 
 (async () => {
   const savedInterval = localStorage.getItem('gpumon.interval');
-  if (savedInterval != null && [...$('#interval').options].some(o => o.value === savedInterval)) $('#interval').value = savedInterval;
+  if (savedInterval != null) setSel(savedInterval);
   const savedSort = localStorage.getItem('gpumon.sort');
   if (savedSort && document.querySelector(`#sortSeg [data-sort="${savedSort}"]`)){
     document.querySelectorAll('#sortSeg [data-sort]').forEach(b => b.classList.toggle('on', b.dataset.sort === savedSort));
@@ -517,5 +541,5 @@ setInterval(upd, 1000);
   await loadHosts();
   render();
   refresh();
-  setTimer(+$('#interval').value);
+  setTimer(selVal());
 })();

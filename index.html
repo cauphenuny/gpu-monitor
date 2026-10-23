@@ -25,9 +25,18 @@
     <button type="button" data-sort="idle">空闲</button>
     <button type="button" data-sort="busy">忙碌</button>
   </div>
-  <select id="interval" title="自动刷新间隔">
-    <option value="5">5s</option><option value="10" selected>10s</option><option value="30">30s</option><option value="60">60s</option><option value="0">手动</option>
-  </select>
+  <div id="intervalSel" class="sel" title="自动刷新间隔">
+    <button type="button" class="sel-btn" aria-haspopup="listbox" aria-expanded="false">
+      <span>10s</span><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.8 6 7.8l3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="sel-menu" role="listbox">
+      <button type="button" data-v="5">5 秒</button>
+      <button type="button" data-v="10" class="on">10 秒</button>
+      <button type="button" data-v="30">30 秒</button>
+      <button type="button" data-v="60">60 秒</button>
+      <button type="button" data-v="0">手动</button>
+    </div>
+  </div>
   <button id="refreshBtn" title="立即刷新"><span class="ri">↻</span> 刷新</button>
   <span id="updated"></span>
 </header>
