@@ -8,6 +8,7 @@ let dragInfo = null, isDragging = false;   // 手动排序模式的拖拽状态
 const clearingHosts = new Set();
 const seenCards = new Set();     // 首次出现的卡片才做入场动画, 刷新重绘不动
 const revealedSparks = new Set();  // 曲线只淡入一次, 重绘不重播
+const justOpenedGroups = new Set(); // 分组刚展开时才播高度动画, 重绘不重播
 const justOpened = new Set();    // 只在刚展开的那一刻播高度动画, 之后的重绘不再重播
 const clearToken = '__GPUMON_CLEAR_TOKEN__';
 let refreshAfterClear = false;
@@ -272,14 +273,14 @@ function render(){
     const col = collapsedGroups.has(g);
     return `<section class="group${col ? ' collapsed' : ''}" data-group="${esc(g)}">
       <div class="group-h" data-group="${esc(g)}">
-        <button class="gcollapse" data-gcol="${esc(g)}" title="折叠/展开">${col ? '▶' : '▼'}</button>
+        <button class="gcollapse" data-gcol="${esc(g)}" title="折叠/展开" aria-expanded="${!col}"><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.8 6 7.8l3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <span class="gname">${g === '' ? '未分组' : esc(g)}</span>
         <span class="gsum">${t.online}/${list.length} 在线 · GPU ${t.busy} 忙 / ${t.idle} 闲</span>
         <span class="gspace"></span>
         <button class="gact rename" data-grename="${esc(g)}" title="重命名分组">✎</button>
         <button class="gact del" data-gdel="${esc(g)}" title="删除分组及其主机">✕</button>
       </div>
-      <div class="grid">${sortedHosts(list).map(h => card(h, g)).join('')}</div>
+      <div class="gbody${col ? '' : ' open'}${justOpenedGroups.has(g) ? ' just' : ''}"><div class="grid">${sortedHosts(list).map(h => card(h, g)).join('')}</div></div>
     </section>`;
   }).join('');
   hydrateSparks();
@@ -392,7 +393,19 @@ $('#root').addEventListener('click', async e => {
     const g = gcol.dataset.gcol;
     collapsedGroups.has(g) ? collapsedGroups.delete(g) : collapsedGroups.add(g);
     localStorage.setItem('gpumon.collapsed', JSON.stringify([...collapsedGroups]));
-    render();
+    const grp = gcol.closest('.group');
+    const body = grp?.querySelector('.gbody');
+    if (!collapsedGroups.has(g)){          // 展开: 直接重绘, 新节点带 open
+      justOpenedGroups.add(g);
+      render();
+      setTimeout(() => justOpenedGroups.delete(g), 400);
+    } else {                               // 收起: 先播收起动画再重绘
+      grp?.classList.add('collapsed');     // 箭头立刻转过去
+      if (body && body.scrollHeight > 0){
+        body.classList.remove('open');
+        setTimeout(render, 340);
+      } else render();
+    }
     return;
   }
   const gren = e.target.closest('[data-grename]');
