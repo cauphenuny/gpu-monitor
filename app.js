@@ -87,12 +87,12 @@ function sparkSVG(pts){
   };
   const last = idx => { for (let i = pts.length - 1; i >= 0; i--) if (pts[i][idx] != null) return pts[i][idx]; return null; };
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="历史曲线">
-    <line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="#1f2836" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="#202933" stroke-width="1" vector-effect="non-scaling-stroke"/>
     <g fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">
-      <g stroke="#7ab3ff">${line(1)}</g>
+      <g stroke="#5ec8f0">${line(1)}</g>
       <g stroke="#a78bfa">${line(2)}</g>
     </g></svg>
-    <div class="sl"><span><i style="background:#7ab3ff"></i>利用率 ${last(1) == null ? '--' : Math.round(last(1)) + '%'}</span>
+    <div class="sl"><span><i style="background:#5ec8f0"></i>利用率 ${last(1) == null ? '--' : Math.round(last(1)) + '%'}</span>
       <span><i style="background:#a78bfa"></i>显存 ${last(2) == null ? '--' : Math.round(last(2)) + '%'}</span>
       <span class="slage">近 ${histSpan(pts)}</span></div>`;
 }
