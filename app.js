@@ -9,6 +9,12 @@ const clearingHosts = new Set();
 const clearToken = '__GPUMON_CLEAR_TOKEN__';
 let refreshAfterClear = false;
 
+const midTrunc = (s, n = 46) => {
+  s = String(s ?? '');
+  if (s.length <= n) return s;
+  const keep = n - 1, head = Math.ceil(keep * .55), tail = keep - head;
+  return s.slice(0, head) + '…' + s.slice(s.length - tail);
+};
 const fmtMiB = v => v == null ? '--' : v >= 1024 ? (v/1024).toFixed(1)+' GB' : Math.round(v)+' MB';
 const fmtG = v => v == null ? '--' : (v/1024).toFixed(1);
 const fpct = v => v == null ? '--' : Math.round(v)+'%';
@@ -27,6 +33,37 @@ function bar(p){
   return `<div class="track"><div class="fill ${cls(q)}" style="width:${q == null ? 0 : q.toFixed(1)}%"></div></div>`;
 }
 
+
+/* ---- 统一弹窗: 原生 <dialog>, 自带遮罩/Esc/焦点管理 ---- */
+function modal({title, desc = '', input = false, value = '', ok = '确定', cancel = true, danger = false}){
+  if (!document?.createElement)   // 无 DOM 环境 (测试桩/极简宿主) 退回原生对话框
+    return Promise.resolve(input ? prompt(title + (desc ? '\n' + desc : ''), value)
+      : danger && !confirm(title + (desc ? '\n' + desc : '')) ? false : true);
+  return new Promise(resolve => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dlg';
+    dlg.innerHTML = `<div class="dlg-t">${esc(title)}</div>
+      ${desc ? `<div class="dlg-d">${esc(desc).replace(/\n/g, '<br>')}</div>` : ''}
+      ${input ? `<input class="dlg-i" value="${esc(value)}" spellcheck="false">` : ''}
+      <div class="dlg-a">${cancel ? '<button type="button" class="ghost" data-no>取消</button>' : ''}
+        <button type="button" class="${danger ? 'danger' : 'primary'}" data-yes>${esc(ok)}</button></div>`;
+    const done = v => { if (dlg.open) dlg.close(); resolve(v); };
+    const val = () => input ? dlg.querySelector('.dlg-i').value : true;
+    dlg.querySelector('[data-no]')?.addEventListener('click', () => done(input ? null : false));
+    dlg.querySelector('[data-yes]').addEventListener('click', () => done(val()));
+    dlg.addEventListener('cancel', e => { e.preventDefault(); done(input ? null : false); });
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    const i = dlg.querySelector('.dlg-i');
+    if (i){ i.focus(); i.select(); i.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); done(val()); } }); }
+    else dlg.querySelector('[data-yes]').focus();
+  });
+}
+const notify = (title, desc = '') => document?.createElement
+  ? modal({title, desc, ok: '知道了', cancel: false})
+  : (alert(title + (desc ? '\n' + desc : '')), Promise.resolve());
+
 function gpuRow(host, g){
   const key = host + '|' + (g.uuid || g.index);
   const open = openGpus.has(key);
@@ -34,8 +71,8 @@ function gpuRow(host, g){
   const n = (g.procs || []).length;
   const spark = open ? `<div class="spark" data-spark="${esc(key)}"><div class="empty">加载历史…</div></div>` : '';
   const procs = (open && n) ? `<div class="procs">${g.procs.map(p =>
-    `<div class="proc"><div class="pname">${p.container ? `<span class="pcontainer" title="${esc(p.container)}">${esc(p.container)}</span>` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span></div><div class="pmeta"><div><span class="pid">#${esc(p.pid)}</span><span class="pmem">${p.mem != null ? fmtMiB(p.mem) : ''}</span></div><div class="ptime" title="进程已运行时长（截至本次采集）">已运行 ${fmtDuration(p.elapsed_seconds)}</div></div></div>`).join('')}</div>` : '';
-  return `<div class="gpu" data-gpu="${esc(key)}" title="点击展开/收起进程">
+    `<div class="proc"><div class="pname">${p.container ? `<span class="pcontainer" title="${esc(p.container)}">${esc(p.container)}</span>` : ''}<span title="${esc(p.name)}">${esc(midTrunc(p.name))}</span></div><div class="pmeta"><div><span class="pid">#${esc(p.pid)}</span><span class="pmem">${p.mem != null ? fmtMiB(p.mem) : ''}</span></div><div class="ptime" title="进程已运行时长（截至本次采集）">已运行 ${fmtDuration(p.elapsed_seconds)}</div></div></div>`).join('')}</div>` : '';
+  return `<div class="gpu${open ? ' open' : ''}" data-gpu="${esc(key)}" title="点击展开/收起进程">
     <div class="l1"><span class="gpu-tag">${esc(g.index)}</span><span class="gpu-name">${esc(g.name)}</span>
       ${n ? `<span class="pcount">${n} 进程</span>` : ''}
       <span class="gpu-side">${g.temp != null ? Math.round(g.temp)+'°C' : ''}${g.temp != null && g.power != null ? ' · ' : ''}${g.power != null ? Math.round(g.power)+'W' : ''}</span></div>
@@ -45,56 +82,78 @@ function gpuRow(host, g){
   </div>`;
 }
 
+const FAIL_LIMIT = 10;   // 连续失败这么多次才判定离线; 单次 ssh 抖动只标黄点
+
+function fmtAgo(ts){
+  if (!ts) return '';
+  const s = Math.max(0, Date.now()/1000 - ts);
+  if (s < 60) return Math.round(s) + ' 秒前';
+  if (s < 3600) return Math.floor(s/60) + ' 分前';
+  if (s < 86400) return Math.floor(s/3600) + ' 小时前';
+  return Math.floor(s/86400) + ' 天前';
+}
+
 function card(host, group){
   const r = results.get(host);
-  let dot = '<span class="dot"></span>', lat = '', ic = '', body = '<div class="waiting">等待数据…</div>';
+  const fails = r?.fails || 0;
+  const online = !!r && (r.ok || fails < FAIL_LIMIT);
+  let dot = '<span class="dot"></span>', ts = '', ic = '', body = '<div class="waiting">等待数据…</div>';
   if (r){
-    dot = `<span class="dot ${r.ok ? 'on' : 'off'}"></span>`;
-    if (r.error) ic = `<span class="err-ic" title="${esc(r.error)}">⚠</span>`;
+    dot = `<span class="dot ${r.ok ? 'on' : online ? 'warn' : 'off'}"></span>`;
+    if (r.error) ic = `<span class="err-ic" title="${esc(r.error)}${fails ? ' · 连续失败 ' + fails + ' 次' : ''}">⚠</span>`;
     body = r.gpus.length ? r.gpus.map(g => gpuRow(host, g)).join('')
       : `<div class="waiting">${r.ok ? '未检测到 GPU' : '暂无数据'}</div>`;
-    if (r.latency_ms != null) lat = `<span class="lat">${r.latency_ms} ms</span>`;
+    ts = `<span class="lat" title="该主机数据最后一次采集成功的时间${fails ? '，已连续失败 ' + fails + ' 次' : ''}">${fmtAgo(r.ts)}</span>`;
   }
   const manual = sortMode() === 'manual';
   const ban = disabled.get(host);
-  return `<section class="card${r && !r.ok ? ' stale' : ''}${ban != null ? ' disabled' : ''}" draggable="${manual}" data-host="${esc(host)}" data-group="${esc(group)}">
-    <div class="card-h">${dot}<span class="host">${esc(host)}</span>${ic}${lat}
+  return `<section class="card${!online ? ' stale' : ''}${ban != null ? ' disabled' : ''}" draggable="${manual}" data-host="${esc(host)}" data-group="${esc(group)}">
+    <div class="card-h">${dot}<span class="host">${esc(host)}</span>${ic}${ts}
       <button type="button" class="toggle" data-toggle-host="${esc(host)}" title="${ban != null ? '解除禁用' : '临时标记为不准使用'}">${ban != null ? '启用' : '禁用'}</button>
-      <button type="button" class="clear" data-clear-host="${esc(host)}" ${!r?.ok || clearingHosts.has(host) ? 'disabled' : ''} title="强制结束此服务器所有 GPU 任务，最多等待 3 分钟确认清空">${clearingHosts.has(host) ? '清空中…' : '一键清空'}</button>
+      <button type="button" class="clear" data-clear-host="${esc(host)}" ${!r?.ok || clearingHosts.has(host) ? 'disabled' : ''} title="强制结束此服务器所有 GPU 任务，最多等待 3 分钟确认清空">${clearingHosts.has(host) ? '清空中…' : '清空'}</button>
       <button class="del" data-del-host="${esc(host)}" data-del-group="${esc(group)}" title="移除">✕</button></div>
-    ${ban != null ? `<div class="ban" title="${esc(ban)}">⛔ 暂停使用：${esc(ban)}</div>` : ''}
+    ${ban != null ? `<div class="ban" title="${esc(ban)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z"/><path d="M8 6v3.6M8 11.8v.2" stroke="#151a20" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>暂停使用：${esc(ban)}</div>` : ''}
     ${body}</section>`;
 }
 
-
-/* ---- 历史曲线: 服务端内存里保留最近 2 小时, 展开某张卡时按主机拉取 ---- */
+/* ---- 历史曲线: 服务端内存里保留最近 12 小时, 展开某张卡时按主机拉取 ---- */
 const histCache = new Map();   // host → {ts, gpus: {gpuKey: [[ts, util%, mem%], …]}}
 const histPending = new Set();
 const HIST_TTL = 15000;
+const SPARK = {util: '#5ec8f0', mem: '#a78bfa'};
+let sparkSeq = 0;
 
-function sparkSVG(pts){
-  if (!pts || pts.length < 2) return '<div class="empty">历史点过少，稍后再看</div>';
-  const W = 100, H = 26, pad = 1;
+function sparkSVG(pts, idx, color){
+  const W = 100, H = 26, pad = 3;
   const t0 = pts[0][0], t1 = pts[pts.length - 1][0], span = t1 - t0 || 1;
   const x = t => (t - t0) / span * (W - pad * 2) + pad;
   const y = v => H - pad - (v / 100) * (H - pad * 2);
-  const line = idx => {
-    let out = '', run = [];
-    const flush = () => { if (run.length > 1) out += `<polyline points="${run.map(([px, py]) => px.toFixed(1) + ',' + py.toFixed(1)).join(' ')}"/>`; run = []; };
-    for (const p of pts){ const v = p[idx]; if (v == null){ flush(); continue; } run.push([x(p[0]), Math.min(H - pad, Math.max(pad, y(v)))]); }
-    flush();
-    return out;
-  };
-  const last = idx => { for (let i = pts.length - 1; i >= 0; i--) if (pts[i][idx] != null) return pts[i][idx]; return null; };
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="历史曲线">
-    <line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="#202933" stroke-width="1" vector-effect="non-scaling-stroke"/>
-    <g fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">
-      <g stroke="#5ec8f0">${line(1)}</g>
-      <g stroke="#a78bfa">${line(2)}</g>
-    </g></svg>
-    <div class="sl"><span><i style="background:#5ec8f0"></i>利用率 ${last(1) == null ? '--' : Math.round(last(1)) + '%'}</span>
-      <span><i style="background:#a78bfa"></i>显存 ${last(2) == null ? '--' : Math.round(last(2)) + '%'}</span>
-      <span class="slage">近 ${histSpan(pts)}</span></div>`;
+  const segs = []; let cur = [];
+  for (const p of pts){
+    const v = p[idx];
+    if (v == null){ if (cur.length > 1) segs.push(cur); cur = []; continue; }
+    cur.push([x(p[0]), Math.min(H - pad, Math.max(pad, y(v)))]);
+  }
+  if (cur.length > 1) segs.push(cur);
+  const str = r => r.map(([px, py]) => px.toFixed(1) + ',' + py.toFixed(1)).join(' ');
+  const gid = 'sg' + (++sparkSeq);
+  const line = segs.map(r => `<polyline points="${str(r)}"/>`).join('');
+  const area = segs.map(r => `<polygon points="${str(r)} ${r[r.length-1][0].toFixed(1)},${H} ${r[0][0].toFixed(1)},${H}"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${color}" stop-opacity=".3"/><stop offset="1" stop-color="${color}" stop-opacity=".02"/>
+    </linearGradient></defs>
+    <g fill="url(#${gid})">${area}</g>
+    <g fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round">${line}</g></svg>`;
+}
+
+function sparkHTML(pts, key){
+  if (!pts || pts.length < 2) return `<div class="spark" data-spark="${esc(key)}"><div class="empty">历史点过少，稍后再看</div></div>`;
+  const last = i => { for (let k = pts.length - 1; k >= 0; k--) if (pts[k][i] != null) return pts[k][i]; return null; };
+  const pct = v => v == null ? '--' : Math.round(v) + '%';
+  return `<div class="spark" data-spark="${esc(key)}" title="近 ${histSpan(pts)}">
+    <div class="sp">${sparkSVG(pts, 1, SPARK.util)}</div>
+    <div class="sp">${sparkSVG(pts, 2, SPARK.mem)}</div></div>`;
 }
 function histSpan(pts){
   const m = (pts[pts.length - 1][0] - pts[0][0]) / 60;
@@ -105,7 +164,8 @@ function drawSparks(host){
   if (!c) return;
   for (const el of document.querySelectorAll('.spark')){
     if (!el.dataset.spark.startsWith(host + '|')) continue;
-    el.innerHTML = sparkSVG(c.gpus[el.dataset.spark.slice(host.length + 1)]);
+    const key = el.dataset.spark;
+    el.outerHTML = sparkHTML(c.gpus[key.slice(host.length + 1)], key);
   }
 }
 async function hydrateSparks(){
@@ -259,10 +319,10 @@ $('#root').addEventListener('click', async e => {
     const host = toggle.dataset.toggleHost;
     let body;
     if (disabled.has(host)){
-      if (!confirm(`解除 ${host} 的禁用？`)) return;
+      if (!await modal({title: `解除 ${host} 的禁用？`, ok: '解除'})) return;
       body = {host, disabled: false};
     } else {
-      const reason = prompt(`临时禁用 ${host}，标注为现在不准使用。\n原因（可选）：`);
+      const reason = await modal({title: `临时禁用 ${host}`, desc: '该机器会标注为现在不准使用，卡数不计入忙闲。', input: true, ok: '禁用', danger: true});
       if (reason == null) return;
       body = {host, disabled: true, reason};
     }
@@ -276,9 +336,9 @@ $('#root').addEventListener('click', async e => {
   if (clear){
     const host = clear.dataset.clearHost;
     if (clear.disabled || clearingHosts.has(host)) return;
-    const confirmation = prompt(`将强制结束 ${host} 上所有 GPU 任务，未保存的进度会丢失。\n请输入完整服务器名确认：\n${host}`);
+    const confirmation = await modal({title: '强制清空 GPU 任务', desc: `将结束 ${host} 上所有 GPU 任务，未保存的进度会丢失。\n请输入服务器名确认：${host}`, input: true, ok: '清空', danger: true});
     if (confirmation == null) return;
-    if (confirmation !== host){ alert('服务器名不匹配，未执行清空'); return; }
+    if (confirmation !== host){ await notify('服务器名不匹配', '未执行清空'); return; }
     clearingHosts.add(host);
     render();
     try{
@@ -289,9 +349,9 @@ $('#root').addEventListener('click', async e => {
       if (d.failed?.length) messages.push('终止失败：' + d.failed.map(p => `PID ${p.pid}: ${p.error}`).join('；'));
       if (d.remaining?.length) messages.push('仍在占卡：PID ' + d.remaining.join(', '));
       if (d.error) messages.push(d.error);
-      alert(messages.join('\n'));
+      await notify(messages.shift(), messages.join('\n'));
     }catch(e){
-      alert(`${host}：清空请求失败，部分任务可能已终止，请刷新确认`);
+      await notify(`${host}：清空请求失败`, '部分任务可能已终止，请刷新确认');
     }finally{
       clearingHosts.delete(host);
       render();
@@ -317,7 +377,7 @@ $('#root').addEventListener('click', async e => {
   const gren = e.target.closest('[data-grename]');
   if (gren){
     const from = gren.dataset.grename;
-    const to = prompt('重命名分组:', from === '' ? '' : from);
+    const to = await modal({title: '重命名分组', input: true, value: from === '' ? '' : from, ok: '重命名'});
     if (to == null) return;
     const t = to.trim();
     if (!t || t === from) return;
@@ -329,7 +389,7 @@ $('#root').addEventListener('click', async e => {
   const gdel = e.target.closest('[data-gdel]');
   if (gdel){
     const g = gdel.dataset.gdel;
-    if (!confirm(`删除分组 "${g === '' ? '未分组' : g}" 及其中所有主机?`)) return;
+    if (!await modal({title: '删除分组', desc: `删除分组「${g === '' ? '未分组' : g}」及其中所有主机？`, ok: '删除', danger: true})) return;
     await fetch('/api/groups?group=' + encodeURIComponent(g), {method:'DELETE'});
     await loadHosts(); render();
     return;

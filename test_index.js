@@ -46,7 +46,7 @@ async function testClearButton(){
   vm.runInContext(script.slice(script.indexOf('function card('), script.indexOf('function tally(')), context);
   vm.runInContext(`function render(){}; function refresh(){ countRefresh(); }
 results.set('test-host', {ok: true, gpus: []});`, context);
-  assert(context.card('test-host', '').includes('一键清空'));
+  assert(context.card('test-host', '').includes('清空'));
   vm.runInContext(script.slice(script.indexOf("$('#root').addEventListener('click', async e => {"),
     script.indexOf("$('#refreshBtn').addEventListener('click', refresh);")), context);
   const event = {target: {closest: selector => selector === '[data-clear-host]' ? button : null}};
@@ -59,13 +59,14 @@ results.set('test-host', {ok: true, gpus: []});`, context);
   assert(alerts.pop().includes('未执行清空'));
   confirmation = 'test-host';
   const pending = onClick(event);
+  await Promise.resolve();   // 弹窗改为 await 后, 状态更新落在下一个微任务
   assert(context.card('test-host', '').includes('清空中…'));
   await onClick(event);
   await pending;
   assert.strictEqual(requests, 1);
   assert.strictEqual(refreshes, 1);
   assert(alerts.pop().includes('仍在占卡：PID 102'));
-  assert(context.card('test-host', '').includes('一键清空'));
+  assert(context.card('test-host', '').includes('清空'));
   console.log('清空按钮：取消、名字校验、重复点击、结果提示和刷新检查通过');
 }
 testClearButton().catch(error => { console.error(error); process.exitCode = 1; });

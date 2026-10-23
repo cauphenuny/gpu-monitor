@@ -127,6 +127,10 @@
     {
       "host": "zp-b300-043",
       "group": "B300"
+    },
+    {
+      "host": "root@172.19.128.206",
+      "group": "B300 (Platform)"
     }
   ],
   "disabled": {

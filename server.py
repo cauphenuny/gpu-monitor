@@ -272,7 +272,8 @@ def collect_host(host):
     return res
 
 
-HISTORY_SECONDS = 2 * 3600   # 内存里保留的历史时长; 服务重启即清空
+HISTORY_SECONDS = 12 * 3600   # 内存里保留的历史时长; 服务重启即清空
+HISTORY_MAX_POINTS = 1440     # 每张卡的点数上限, 超出后隔点抽稀 (时间窗不变, 精度减半)
 _history = {}                # host → {gpu_key: [[ts, util%, mem%], ...]}
 _history_lock = threading.Lock()
 
@@ -290,6 +291,8 @@ def _record_history(host, gpus):
             pts.append([round(time.time(), 1), g.get("util"), None if mem_pct is None else round(mem_pct, 1)])
             while pts and pts[0][0] < cutoff:
                 pts.pop(0)
+            if len(pts) > HISTORY_MAX_POINTS:   # ponytail: 隔点抽稀, 精度降到 2x/4x… 点够时可换成分桶平均
+                pts[:] = pts[::2]
         for key in list(per_host):   # 卡下架后不再记录
             if key not in live:
                 del per_host[key]
@@ -315,6 +318,8 @@ def gpu_history(host, minutes=None, max_points=180):
     return out
 
 
+_fails = {}   # host → 连续失败次数, 成功的采集会清零; 前端据此决定何时算真离线
+
 _last_ok = {}  # ponytail: 仅存内存, 服务重启/命令行单次查询时没有旧数据可回退; 需要时落盘
 
 
@@ -322,14 +327,16 @@ def query_host(host):
     """查询失败时回退到该主机上一次成功的数据, 用 stale/data_age_seconds 标注数据有多旧."""
     res = collect_host(host)
     if res["ok"]:
+        _fails[host] = 0
         _last_ok[host] = res
         _record_history(host, res["gpus"])
-        return {**res, "stale": False, "data_age_seconds": 0}
+        return {**res, "stale": False, "data_age_seconds": 0, "fails": 0}
+    fails = _fails[host] = _fails.get(host, 0) + 1
     last = _last_ok.get(host)
     if last is None:
-        return {**res, "stale": False, "data_age_seconds": None}
+        return {**res, "stale": False, "data_age_seconds": None, "fails": fails}
     return {**last, "ok": False, "error": res["error"], "latency_ms": res["latency_ms"],
-            "stale": True, "data_age_seconds": round(time.time() - last["ts"])}
+            "stale": True, "data_age_seconds": round(time.time() - last["ts"]), "fails": fails}
 
 
 def query_all(hosts):
@@ -342,7 +349,7 @@ def query_all(hosts):
 
 def brief_result(r):
     """精简结果: 每张卡只保留显存占用和占用显存的容器名 (去重, 不在容器里的进程不列出)."""
-    return {"host": r["host"], "ok": r["ok"], "error": r["error"], "stale": r["stale"],
+    return {"host": r["host"], "ok": r["ok"], "error": r["error"], "stale": r["stale"], "fails": r.get("fails"),
             "data_age_seconds": r["data_age_seconds"], "disabled": r.get("disabled"),
             "gpus": [{"index": g["index"], "mem_used": g["mem_used"], "mem_total": g["mem_total"],
                       "containers": list(dict.fromkeys(p["container"] for p in g["procs"] if p["container"]))}
