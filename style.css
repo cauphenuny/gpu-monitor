@@ -39,19 +39,21 @@ header{
 #hostInput{width:200px}
 #hostInput:hover{border-color:#313c49;background:#11171d}
 #hostInput:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
-.grp{display:flex;align-items:center;background:#101519;border:1px solid var(--line);border-radius:var(--r-ctl);
+.grp{display:flex;align-items:center;gap:8px;padding-right:10px;background:#101519;border:1px solid var(--line);border-radius:var(--r-ctl);
   transition:border-color .24s, box-shadow .24s, background .24s}
 .grp:hover{border-color:#313c49;background:#11171d}
-.grp:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
+.grp:focus-within,.grp.open{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
 .grp #groupInput{width:96px;background:none;border:none;outline:none;color:var(--text);
-  padding:6px 4px 6px 10px;font-size:13px;min-width:0}
-.grp-btn{background:none;border:none;padding:0 7px 0 2px;height:100%;display:flex;align-items:center;
-  border-radius:var(--r-chip);color:var(--muted);transition:color .24s}
+  padding:6px 0 6px 10px;font-size:13px;min-width:0}
+.grp-btn{background:none;border:none;padding:0;height:100%;display:flex;align-items:center;
+  border-radius:var(--r-chip);color:var(--muted);transition:color .2s}
 .grp-btn:hover{border:none;background:none;color:var(--text)}
+.grp .chev{width:12px;height:12px;flex:none;transition:transform .26s ease, color .2s}
 .grp.open .grp-btn{color:var(--accent)}
-.grp .chev{width:12px;height:12px;transition:transform .26s ease}
 .grp.open .chev{transform:rotate(180deg)}
 .grp.empty .grp-btn{display:none}
+.grp.empty{padding-right:0}
+.grp.empty #groupInput{padding-right:10px}
 .grp .sel-menu{left:0;right:auto;min-width:150px;max-height:260px;overflow:auto}
 .seg{display:flex;gap:2px;background:#101519;border:1px solid var(--line);border-radius:var(--r-ctl);padding:2px}
 .seg button{
@@ -74,7 +76,7 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(var(--accent-rgb),.2
 .sel-btn{
   display:flex;align-items:center;gap:8px;min-width:88px;justify-content:space-between;
   background:#101519;border:1px solid var(--line);border-radius:var(--r-ctl);
-  padding:6px 10px;font-size:13px;color:var(--text);transition:border-color .15s, background .15s, box-shadow .15s;
+  padding:6px 10px;font-size:13px;color:var(--text);transition:border-color .24s, background .24s, box-shadow .24s;
 }
 .sel-btn:hover{border-color:#313c49;background:#11171d}
 .sel.open .sel-btn{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
