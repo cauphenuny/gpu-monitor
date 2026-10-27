@@ -20,6 +20,22 @@ const fmtTime = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN', {hour12: 
 const badge = s => `<span class="badge ${STATUS[s]?.[1] || ''}">${STATUS[s]?.[0] || esc(s)}</span>`;
 const runFor = t => t.started ? fmtDuration((t.ended || Date.now() / 1000) - t.started) : '--';
 
+// 全屏: 任何 .fs-wrap 里放一个 fsBtn, 点一下铺满窗口, 再点或 Esc 退回
+const fsBtn = '<button type="button" class="fs-btn" data-fs title="全屏 (Esc 退出)" aria-label="全屏"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="on" d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/><path class="off" d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/></svg></button>';
+const fsWrap = (inner, attrs = '') => `<div class="fs-wrap"${attrs}>${inner}${fsBtn}</div>`;
+function setFs(wrap, on){
+  wrap.classList.toggle('fs', on);
+  (wrap.querySelector('textarea') || wrap.querySelector('[data-fs]')).focus();
+}
+document.addEventListener('click', e => {
+  const wrap = e.target.closest('[data-fs]')?.closest('.fs-wrap');
+  if (wrap) setFs(wrap, !wrap.classList.contains('fs'));
+});
+document.addEventListener('keydown', e => {
+  const wrap = document.querySelector('.fs-wrap.fs');
+  if (e.key === 'Escape' && wrap && !document.querySelector('dialog[open]')){ e.preventDefault(); setFs(wrap, false); }
+});
+
 async function route(){
   clearTimeout(pollTimer);
   scrollTo(0, 0);
@@ -58,7 +74,6 @@ async function showForm(fromId){
   let load = new Map();   // host → /api/status 结果; 查询要几秒, 先画名字, 到了再补负载
   const field = (label, hint, input) => `<label class="field"><span>${label}${hint ? ` <small>${hint}</small>` : ''}</span>${input}</label>`;
   const area = (name, rows, mono = true) => `<textarea name="${name}" rows="${rows}" spellcheck="false"${mono ? ' class="mono"' : ''}>${esc(cfg[name])}</textarea>`;
-  const fsBtn = '<button type="button" class="fs-btn" data-fs title="全屏编辑 (Esc 退出)" aria-label="全屏编辑"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="on" d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/><path class="off" d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/></svg></button>';
   $('#view').innerHTML = `<form id="taskForm" class="form panel">
     <div class="form-h"><a href="#" class="back">‹ 任务</a><h2>${src ? '复制任务' : '新建任务'}</h2><span class="gspace"></span>
       <button type="button" class="btn" data-json="import" title="从剪贴板读取 JSON 填入表单（不含主机）">导入 JSON</button>
@@ -70,7 +85,7 @@ async function showForm(fromId){
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
     ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', area('env', 8))}
     ${field('挂载', '每行 src[:dst[:ro]]，dst 省略时同 src；src 须在每台主机上存在', area('mounts', 4))}
-    ${field('Entrypoint', '全部容器就绪后在 head 上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', `<div class="fs-wrap">${area('entrypoint', 16)}${fsBtn}</div>`)}
+    ${field('Entrypoint', '全部容器就绪后在 head 上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', fsWrap(area('entrypoint', 16)))}
     ${field('安装 sshd 用的代理', '可选，如 http://proxy:8888；镜像里没有 sshd 时 apt 走这个代理，只在安装时生效，不进容器环境变量', `<input name="proxy" class="mono" spellcheck="false" placeholder="不填则直连" value="${esc(cfg.proxy || '')}">`)}
     ${field('docker run 额外参数', '已固定 --gpus all --network host --ipc private --privileged；/dev/shm 大小用 --shm-size 指定，不写则只有 docker 默认的 64MB', `<input name="docker_args" class="mono" spellcheck="false" value="${esc(cfg.docker_args)}">`)}
     <div class="form-a"><a class="btn ghost" href="#">取消</a><button class="primary" type="submit">提交</button></div>
@@ -94,10 +109,6 @@ async function showForm(fromId){
     drawPick();
   });
   const form = $('#taskForm');
-  const wrap = form.querySelector('.fs-wrap');
-  const setFs = on => { wrap.classList.toggle('fs', on); wrap.querySelector('textarea').focus(); };
-  wrap.querySelector('[data-fs]').addEventListener('click', () => setFs(!wrap.classList.contains('fs')));
-  wrap.addEventListener('keydown', e => { if (e.key === 'Escape' && wrap.classList.contains('fs')){ e.preventDefault(); setFs(false); } });
   form.querySelector('.form-h').addEventListener('click', async e => {
     const act = e.target.closest('[data-json]')?.dataset.json;
     if (!act) return;
@@ -179,7 +190,7 @@ function taskHead(t, cfgOpen){
     <details id="cfg" class="panel"${cfgOpen ? ' open' : ''}><summary>配置</summary>
       ${env.length ? `<div class="cfg-l">环境变量</div>${miniTable(['KEY', 'VALUE'], env)}` : ''}
       ${mounts.length ? `<div class="cfg-l">挂载</div>${miniTable(['主机路径', '容器路径', ''], mounts)}` : ''}
-      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('Entrypoint', t.config.entrypoint)}
+      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">Entrypoint</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
     </details>`;
 }
 
@@ -193,19 +204,23 @@ async function showTask(id){
       <div class="seg" id="logLvl" title="详细：额外显示每条远端命令、实时 stderr、退出码与耗时">
         <button type="button" data-l="info" class="on">简要</button><button type="button" data-l="debug">详细</button></div>
       <span id="logCap" class="log-cap" hidden>日志超过 1 MB，只显示开头部分 <button type="button" class="btn">跳到末尾并跟随</button></span></div>
-      <pre id="log" class="log panel"></pre></div>
+      ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
       <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="head 容器内的路径，目录或文件" title="在 head 容器里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
       <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span></div>
       <div id="rFiles" class="rfiles"></div>
-      <pre id="rLog" class="log panel" hidden></pre></div>`;
+      ${fsWrap('<pre id="rLog" class="log panel"></pre>', ' id="rWrap" hidden')}</div>`;
   const pre = $('#log'), head = $('#taskHead'), cap = $('#logCap'), lvl = $('#logLvl');
   let debug = false;
   const resetLog = (w, tail = false) => { which = w; offset = tail ? -1 : 0; tailMode = tail; pre.textContent = ''; cap.hidden = true; };
   let drawn = '';
   const draw = () => {
     const html = taskHead(t, $('#cfg')?.open);
-    if (html !== drawn) head.innerHTML = drawn = html;   // 内容没变不重建, 免得按钮在点击途中被换掉
+    if (html !== drawn){   // 内容没变不重建, 免得按钮在点击途中被换掉
+      const fs = !!$('#epWrap.fs');
+      head.innerHTML = drawn = html;
+      if (fs) $('#epWrap')?.classList.add('fs');   // 重建时保住 entrypoint 的全屏状态
+    }
     $('#runFor').textContent = runFor(t);
     document.querySelectorAll('#logSeg button').forEach(b => b.classList.toggle('on', b.dataset.w === which));
     lvl.hidden = which !== 'launch';
@@ -315,7 +330,7 @@ function remoteLog(id, task){
   }
   function open(path){
     const my = ++gen;
-    out.hidden = false; out.textContent = '';
+    $('#rWrap').hidden = false; out.textContent = '';
     list.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', join(form.p.value.trim(), c.dataset.f) === path));
     follow(path, my);
   }
@@ -324,7 +339,7 @@ function remoteLog(id, task){
     const dir = form.p.value.trim();
     localStorage.setItem(key, dir);
     gen++; clearTimeout(timer);
-    info.textContent = '列出中…'; list.innerHTML = ''; out.hidden = true;
+    info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true;
     try{
       const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}`);
       if (r.files.length === 1 && !r.files[0].name) return open(dir);   // 输入的就是文件
