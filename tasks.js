@@ -203,16 +203,20 @@ async function showTask(id){
       <button type="button" data-w="output">entrypoint 输出</button><button type="button" data-w="launch">启动日志</button></div>
       <div class="seg" id="logLvl" title="详细：额外显示每条远端命令、实时 stderr、退出码与耗时">
         <button type="button" data-l="info" class="on">简要</button><button type="button" data-l="debug">详细</button></div>
-      <span id="logCap" class="log-cap" hidden>日志超过 1 MB，只显示开头部分 <button type="button" class="btn">跳到末尾并跟随</button></span></div>
+      <span id="logCap" class="log-cap" hidden>日志超过 1 MB，只显示开头部分 <button type="button" class="btn">跳到末尾并跟随</button></span>
+      <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，空格分隔" title="只显示包含这些词的行（都要命中，大小写不敏感）"><span class="sub" id="logCnt"></span></span></div>
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
       <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="head 容器内的路径，目录或文件" title="在 head 容器里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
-      <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span></div>
+      <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span>
+      <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，空格分隔" title="只显示包含这些词的行（都要命中，大小写不敏感）"><span class="sub" id="rCnt"></span></span></div>
       <div id="rFiles" class="rfiles"></div>
       ${fsWrap('<pre id="rLog" class="log panel"></pre>', ' id="rWrap" hidden')}</div>`;
-  const pre = $('#log'), head = $('#taskHead'), cap = $('#logCap'), lvl = $('#logLvl');
+  const pre = $('#log'), head = $('#taskHead'), cap = $('#logCap'), lvl = $('#logLvl'),
+        fq = $('#logFilter'), cnt = $('#logCnt');
   let debug = false;
-  const resetLog = (w, tail = false) => { which = w; offset = tail ? -1 : 0; tailMode = tail; pre.textContent = ''; cap.hidden = true; };
+  const lf = lineFilter(pre, fq, cnt);
+  const resetLog = (w, tail = false) => { which = w; offset = tail ? -1 : 0; tailMode = tail; cap.hidden = true; lf.reset(); };
   let drawn = '';
   const draw = () => {
     const html = taskHead(t, $('#cfg')?.open);
@@ -238,9 +242,7 @@ async function showTask(id){
       for (let more = true; more && (tailMode || offset < LOG_HEAD);){
         const r = await api(`/api/tasks/log?id=${id}&which=${which}&offset=${offset}${debug ? '&level=debug' : ''}`);
         if (my !== gen) return;
-        const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-        if (r.text) pre.insertAdjacentHTML('beforeend', ansiHTML(r.text));
-        if (atBottom) pre.scrollTop = pre.scrollHeight;
+        if (r.text) lf.emit(r.text);
         offset = r.offset;
         more = r.more;
       }
@@ -303,6 +305,7 @@ async function showTask(id){
 // 实时日志面板: 列出 head 容器里某目录的文件, 点一个就每 2 秒增量读一次, 类似 tail -f
 function remoteLog(id, task){
   const form = $('#rForm'), info = $('#rInfo'), list = $('#rFiles'), out = $('#rLog');
+  const lf = lineFilter(out, $('#rFilter'), $('#rCnt'));
   const key = 'gpumon.rpath.' + id;
   form.p.value = localStorage.getItem(key) || '/logs';   // platform 启动脚本把本次日志目录软链到 /logs
   let gen = 0, timer = null;
@@ -314,11 +317,8 @@ function remoteLog(id, task){
       for (let more = true; more;){
         const r = await api(`/api/tasks/tail?id=${id}&path=${encodeURIComponent(path)}&offset=${offset}`);
         if (!alive(my)) return;
-        if (r.reset) out.textContent = '';
-        const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
-        if (r.text) out.insertAdjacentHTML('beforeend', ansiHTML(r.text));
-        if (out.textContent.length > 4e6) out.textContent = out.textContent.slice(-2e6);   // 页面里最多留约 2MB
-        if (atBottom) out.scrollTop = out.scrollHeight;
+        if (r.reset) lf.reset();
+        if (r.text) lf.emit(r.text);
         offset = r.offset; more = r.more;
         info.textContent = `${path} · ${fmtBytes(r.size)} · ${new Date().toLocaleTimeString('zh-CN', {hour12: false})} 更新`;
       }
@@ -330,7 +330,7 @@ function remoteLog(id, task){
   }
   function open(path){
     const my = ++gen;
-    $('#rWrap').hidden = false; out.textContent = '';
+    $('#rWrap').hidden = false; lf.reset();
     list.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', join(form.p.value.trim(), c.dataset.f) === path));
     follow(path, my);
   }
@@ -339,7 +339,7 @@ function remoteLog(id, task){
     const dir = form.p.value.trim();
     localStorage.setItem(key, dir);
     gen++; clearTimeout(timer);
-    info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true;
+    info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true; lf.reset();
     try{
       const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}`);
       if (r.files.length === 1 && !r.files[0].name) return open(dir);   // 输入的就是文件

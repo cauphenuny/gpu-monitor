@@ -332,6 +332,8 @@ h2.rename:hover{border-bottom-color:var(--faint)}
 .mini-tbl td{padding:5px 10px;border-top:1px solid var(--line-soft);color:#c7d0dd;overflow-wrap:anywhere;vertical-align:top}
 .mini-tbl td:first-child{white-space:nowrap;width:1%}
 .log-h .seg[hidden]{display:none}
+.log-filter{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
+.log-filter .inp{width:150px}
 .sec-t{font-size:13px;font-weight:700;color:#d8e1ee;white-space:nowrap}
 .rpath{display:flex;gap:6px;flex:1;max-width:560px}
 .inp{flex:1;min-width:0;background:#101519;border:1px solid var(--line);color:var(--text);border-radius:var(--r-ctl);padding:6px 10px;

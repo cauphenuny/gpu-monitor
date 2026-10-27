@@ -43,6 +43,53 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
     else dlg.querySelector('[data-yes]').focus();
   });
 }
+// 日志过滤: 空格分隔多个词, 全部命中 (大小写不敏感) 的行才算匹配
+function parseFilter(q){
+  return q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+function matchFilter(line, terms){
+  return !terms.length || terms.every(t => line.toLowerCase().includes(t));
+}
+
+// 每个日志框一套: 输入框防抖改词后整体重画, 平时 emit() 只进匹配的新行; 缓冲约 2MB, 更早的丢弃
+function lineFilter(pre, input, cnt, cap = 2e6){
+  let filter = '', shown = '', buf = '', total = 0, matched = 0, t;
+  const counts = () => cnt.textContent = filter.trim() && total ? `${matched}/${total} 行` : '';
+  const draw = lines => {
+    pre.insertAdjacentHTML('beforeend', ansiHTML(lines.join('\n') + '\n'));
+  };
+  const emit = text => {
+    const stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    buf += text;
+    const lines = buf.split('\n');
+    buf = lines.pop();   // 半行留到下次
+    shown += lines.map(l => l + '\n').join('');
+    if (shown.length > cap) shown = shown.slice(-cap);
+    total += lines.length;
+    const terms = parseFilter(filter);
+    const visible = lines.filter(l => matchFilter(l, terms));
+    matched += visible.length;
+    if (visible.length) draw(visible);
+    if (stick) pre.scrollTop = pre.scrollHeight;
+    counts();
+  };
+  const renderAll = () => {
+    const lines = shown.split('\n'); lines.pop();
+    total = lines.length;
+    const terms = parseFilter(filter);
+    const visible = lines.filter(l => matchFilter(l, terms));
+    matched = visible.length;
+    pre.textContent = '';
+    if (visible.length) draw(visible);
+    counts();
+  };
+  input.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => { filter = input.value; renderAll(); }, 250);
+  });
+  return {emit, reset(){ shown = ''; buf = ''; total = matched = 0; pre.textContent = ''; counts(); }};
+}
+
 // ANSI 转义 → 可见的 HTML: 保留常用 8 色+亮色的前景/背景和粗体/斜体/下划线/删除线,
 // 其余控制序列 (光标移动等) 丢弃. 在 <pre> 里用, 先 esc() 再过这个.
 const ANSI = {

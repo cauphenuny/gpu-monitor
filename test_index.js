@@ -4,7 +4,7 @@ const assert = require('assert');
 
 const script = fs.readFileSync(`${__dirname}/app.js`, 'utf8');
 new vm.Script(script);
-const context = vm.createContext({localStorage: {getItem: () => null}});
+const context = vm.createContext({localStorage: {getItem: () => null}, setTimeout, clearTimeout});
 vm.runInContext(fs.readFileSync(`${__dirname}/common.js`, 'utf8'), context);
 vm.runInContext(script.split('function card(')[0] + `
 openGpus.add('host|GPU-test');
@@ -25,7 +25,31 @@ const fallback = context.renderProc({name: 'worker', pid: '102'});
 assert(fallback.includes('>worker</span>') && fallback.includes('已运行 --'));
 assert(!fallback.includes('class="pcontainer"'));
 assert(!context.renderProc({container: '<img src=x>', name: '<script>'}).includes('<img src=x>'));
-console.log('页面时长格式、名称显示和回退检查通过');
+console.log('页面时长格式、名称显示、回退和日志过滤检查通过');
+
+async function testLogFilter(){   // 日志过滤: 多词 AND、大小写不敏感; 半行留到写完; 改词后整体重画
+  for (const [line, q, want] of [['ERROR bad thing', 'error', true], ['ERROR bad thing', 'error warn', false],
+      ['plain line', 'PLAIN', true], ['a b c', 'b a', true], ['x', '', true]])
+    assert.strictEqual(context.matchFilter(line, context.parseFilter(q)), want);
+  const pre = {textContent: '', insertAdjacentHTML(_, html){ this.textContent += html; },
+               scrollHeight: 0, scrollTop: 0, clientHeight: 0};
+  let onInput;
+  const input = {addEventListener(_, fn){ onInput = fn; }, value: ''};
+  const cnt = {textContent: ''};
+  const lf = context.lineFilter(pre, input, cnt, 1e9);
+  lf.emit('ERROR one\nINFO two\n');
+  assert(pre.textContent.includes('one') && pre.textContent.includes('two'));   // 无过滤词全显示
+  input.value = 'error';
+  onInput();
+  await new Promise(r => setTimeout(r, 400));                                   // 等防抖
+  assert(pre.textContent.includes('ERROR one') && !pre.textContent.includes('INFO two'));
+  assert.strictEqual(cnt.textContent, '1/2 行');
+  lf.emit('ERROR a\nINFO b\nERROR c\nno newline yet');
+  assert(pre.textContent.includes('ERROR a') && !pre.textContent.includes('INFO b') && pre.textContent.includes('ERROR c'));
+  assert(!pre.textContent.includes('newline yet'));                             // 半行不显示
+  console.log('日志过滤检查通过');
+}
+testLogFilter().catch(error => { console.error(error); process.exitCode = 1; });
 
 async function testClearButton(){
   let onClick, confirmation, requests = 0, refreshes = 0;

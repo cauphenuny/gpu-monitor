@@ -57,8 +57,10 @@ class ParseTest(unittest.TestCase):
         s = tasks.setup_script("1.2.3.4", "proxy.local:8888")
         self.assertIn("export http_proxy=http://proxy.local:8888 https_proxy=http://proxy.local:8888", s)
         self.assertLess(s.index("https_proxy"), s.index("apt-get update"))
-        self.assertLess(s.index("https_proxy"), s.index("fi\n"))  # 只在装 sshd 的分支里
-        self.assertNotIn("proxy", tasks.setup_script("1.2.3.4"))
+        self.assertLess(s.index("https_proxy"), s.index("apt-get update"))
+        # 无代理时不注入; 无论有没有代理, 代理变量都不写进 ~/.ssh/environment (env 行会滤掉)
+        self.assertNotIn("export http_proxy", tasks.setup_script("1.2.3.4"))
+        self.assertIn("https?_proxy|HTTPS?_PROXY", tasks.setup_script("1.2.3.4", "p:1"))
         with self.assertRaisesRegex(tasks.TaskError, "代理"):
             tasks.validate({**CFG, "proxy": "http://a b"}, {"h1", "h2"})
 
