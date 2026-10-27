@@ -11,6 +11,8 @@ ssh (支持 ~/.ssh/config 别名与密钥) 到各主机并行执行 nvidia-smi �
 
 import argparse
 import csv
+import os
+import sys
 import io
 import json
 import re
@@ -412,6 +414,28 @@ def clear_host(host):
         return {"ok": False, "error": "清空结果无法解析，部分任务可能已终止，请刷新确认"}
 
 
+def git_pull():
+    """在本仓库目录 git pull --ff-only; 返回是否拉到了新东西."""
+    try:
+        p = subprocess.run(["git", "pull", "--ff-only"], cwd=ROOT, capture_output=True,
+                           text=True, timeout=120)
+    except FileNotFoundError:
+        return {"ok": False, "out": "本机没有 git 命令", "changed": False}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "out": "git pull 超时 (120s)", "changed": False}
+    out = (p.stdout + "\n" + p.stderr).strip() or "(无输出)"
+    changed = p.returncode == 0 and "Already up to date" not in p.stdout and "最新" not in out
+    return {"ok": p.returncode == 0, "out": out, "changed": changed}
+
+
+def _restart_soon():
+    """拉到新代码后用新文件重新执行自己 (python sockets 默认不继承, 新进程重新绑端口)."""
+    def go():
+        time.sleep(0.8)   # 等响应发完
+        os.execv(sys.executable, [sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]])
+    threading.Thread(target=go, daemon=True).start()
+
+
 def _bad_host(h):
     """Host 头不在允许列表时回 403 并返回 True."""
     if ALLOWED_HOSTS is None or h.headers.get("Host", "").lower() in ALLOWED_HOSTS:
@@ -527,6 +551,12 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = tasks.validate(body.get("config"), {e["host"] for e in load_entries()})
                 return self._json(tasks.create(body.get("name"), body.get("note"), cfg,
                                                load_settings()["docker_prefix"]))
+            if path == "/api/update":
+                r = git_pull()
+                restarting = r["ok"] and r["changed"]
+                if restarting:
+                    _restart_soon()
+                return self._json({**r, "restarting": restarting})
             if path == "/api/tasks/rename":
                 return self._json(tasks.rename(body.get("id"), body.get("name")))
             if path == "/api/tasks/stop":
@@ -543,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
         if _bad_host(self):
             return
         path = urllib.parse.urlparse(self.path).path
-        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/settings"):
+        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/settings", "/api/update"):
             return self._task_post(path)
         if path == "/api/hosts/clear":
             if self.headers.get_content_type() != "application/json":

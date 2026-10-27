@@ -162,6 +162,25 @@ GPU = "0, GPU-test, NVIDIA Test, 50, 2048, 8192, 60, 100\n"
 PROCS = "GPU-test, 101, /usr/bin/python, 1024\nGPU-test, 102, worker, 1024\n"
 
 
+class GitPullTest(unittest.TestCase):
+    def parse(self, rc, out, err=""):
+        with patch.object(server.subprocess, "run",
+                          return_value=CompletedProcess([], rc, stdout=out, stderr=err)):
+            return server.git_pull()
+
+    def test_up_to_date_means_no_restart(self):
+        self.assertEqual(self.parse(0, "Already up to date."), {"ok": True, "out": "Already up to date.", "changed": False})
+
+    def test_fast_forward_means_restart(self):
+        r = self.parse(0, "Updating a..b\nFast-forward\n server.py | 2 +-")
+        self.assertEqual((r["ok"], r["changed"]), (True, True))
+
+    def test_failure_reports_output(self):
+        r = self.parse(128, "", "fatal: not a git repository")
+        self.assertEqual((r["ok"], r["changed"]), (False, False))
+        self.assertIn("not a git repository", r["out"])
+
+
 class ContainerNamesTest(unittest.TestCase):
     def test_elapsed_seconds(self):
         output = (GPU + "__GPUMON_P__\n" + PROCS

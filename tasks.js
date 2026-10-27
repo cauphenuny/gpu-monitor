@@ -365,6 +365,23 @@ function remoteLog(id, task){
   if (task().containers_up) form.requestSubmit();
 }
 
+$('#updateBtn').addEventListener('click', async () => {
+  if (!await modal({title: '更新并重启？', desc: '在服务目录执行 git pull，拉到新代码后自动重启服务，本页稍后自动刷新。运行中的任务不受影响（entrypoint 在容器里跑），但重启期间页面会短暂无响应。', ok: '更新', danger: true})) return;
+  let d;
+  try{ d = await post('/api/update'); }
+  catch(e){ return notify('更新失败', e.message); }
+  if (!d.ok) return notify('git pull 失败', d.out);
+  if (!d.changed) return notify('已是最新代码，无需重启', d.out);
+  notify('已拉到新代码，服务重启中…', '页面稍后自动刷新。');
+  const t0 = Date.now();
+  (function wait(){
+    setTimeout(async () => {
+      try{ await api('/api/settings'); location.reload(); }
+      catch{ Date.now() - t0 < 30000 ? wait() : notify('服务 30 秒内没有回来', '请手动刷新页面确认。'); }
+    }, 1500);
+  })();
+});
+
 $('#settingsBtn').addEventListener('click', async () => {
   try{
     const s = await api('/api/settings');
