@@ -157,6 +157,7 @@ globalThis.document?.getElementById?.('updateBtn')?.addEventListener('click', as
   try{
     const r = await fetch('/api/update', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-GPUMon-Token': clearToken}});
     d = await r.json();
+    if (!r.ok) return notify('更新失败', d.error || r.statusText);   // 比如老进程没有这个接口 (not found)
   }catch(e){ return notify('更新失败', e.message); }
   if (!d.ok) return notify('git pull 失败', d.out);
   if (!d.changed) return notify('已是最新代码，无需重启', d.out);
