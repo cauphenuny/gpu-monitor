@@ -43,6 +43,66 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
     else dlg.querySelector('[data-yes]').focus();
   });
 }
+// ANSI 转义 → 可见的 HTML: 保留常用 8 色+亮色的前景/背景和粗体/斜体/下划线/删除线,
+// 其余控制序列 (光标移动等) 丢弃. 在 <pre> 里用, 先 esc() 再过这个.
+const ANSI = {
+  fg: {30: '#8b95a4', 31: '#f87171', 32: '#4ade80', 33: '#fbbf24', 34: '#7ab3ff', 35: '#c4a5f5', 36: '#67d3e0', 37: '#e6ebf2',
+       90: '#6d7788', 91: '#ffb4b4', 92: '#86efac', 93: '#fde68a', 94: '#a5cdff', 95: '#d8bffe', 96: '#9ae4ee', 97: '#ffffff'},
+  bg: {40: '#232c3a', 41: '#5c2828', 42: '#274d33', 43: '#544320', 44: '#24466b', 45: '#46326b', 46: '#1f4f56', 47: '#39424f',
+       100: '#3a4350', 101: '#7a4040', 102: '#4a7a58', 103: '#7a6a3f', 104: '#42688f', 105: '#5f4a8f', 106: '#3f7278', 107: '#525c6a'},
+};
+const CSI = /\x1b\[([0-9;:?<=> ]*)?([ -\/]*)([@-~])/g;   // CSI 序列; 字母参数决定含义
+
+function ansiHTML(text){
+  // 先按终端语义处理 \r: 同一行里 \r 后的内容从行首覆盖 (tqdm 等进度条靠这个原地刷新;
+  // HTML 解析器会把 \r 当换行, 不处理会刷出成百上千行)
+  text = text.split('\n').map(line => {
+    const segs = line.split('\r');
+    const acc = [...segs[0]];
+    for (let k = 1; k < segs.length; k++){
+      const sg = segs[k];
+      for (let j = 0; j < sg.length; j++) acc[j] = sg[j];
+    }
+    return acc.join('');
+  }).join('\n');
+  let out = '', i = 0, fg = null, bg = null, bold = false, italic = false, under = false, strike = false;
+  const styles = [];
+  const open = () => styles.map(s => `<span ${s}>`).join('');
+  text.replace(CSI, (m, params, inter, fin, idx) => {
+    out += open() + esc(text.slice(i, idx)) + '</span>'.repeat(styles.length);
+    i = idx + m.length;
+    if (fin === 'm' && !inter){   // SGR; 其他序列 (光标/擦除等) 直接丢弃
+      const ps = String(params ?? '').split(';').map(x => parseInt(x || '0', 10));
+      for (let k = 0; k < ps.length; k++){
+        const p = ps[k];
+        if (p === 38 || p === 48){   // 38;5;N / 38;2;R;G;B 扩展色: 不支持, 连参数一起跳过
+          k += ps[k + 1] === 5 ? 2 : ps[k + 1] === 2 ? 4 : 0;
+          continue;
+        }
+        if (p === 0) [fg, bg, bold, italic, under, strike] = [null, null, false, false, false, false];
+        else if (p === 1) bold = true;
+        else if (p === 3) italic = true;
+        else if (p === 4) under = true;
+        else if (p === 9) strike = true;
+        else if (p === 22) bold = false;
+        else if (p === 23) italic = false;
+        else if (p === 24) under = false;
+        else if (p === 29) strike = false;
+        else if (p === 39) fg = null;
+        else if (p === 49) bg = null;
+        else if (ANSI.fg[p]) fg = p;
+        else if (ANSI.bg[p]) bg = p;
+      }
+      styles.length = 0;
+      if (bold || italic || under || strike) styles.push(`style="${[bold && 'font-weight:700', italic && 'font-style:italic', under && 'text-decoration:underline', strike && 'text-decoration:line-through'].filter(Boolean).join(';')}"`);
+      if (fg) styles.push(`style="color:${ANSI.fg[fg]}"`);
+      if (bg) styles.push(`style="background:${ANSI.bg[bg]}"`);
+    }
+    return '';
+  });
+  return out + open() + esc(text.slice(i)) + '</span>'.repeat(styles.length);
+}
+
 const notify = (title, desc = '') => document?.createElement
   ? modal({title, desc, ok: '知道了', cancel: false})
   : (alert(title + (desc ? '\n' + desc : '')), Promise.resolve());

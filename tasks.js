@@ -239,7 +239,7 @@ async function showTask(id){
         const r = await api(`/api/tasks/log?id=${id}&which=${which}&offset=${offset}${debug ? '&level=debug' : ''}`);
         if (my !== gen) return;
         const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-        if (r.text) pre.append(r.text);
+        if (r.text) pre.insertAdjacentHTML('beforeend', ansiHTML(r.text));
         if (atBottom) pre.scrollTop = pre.scrollHeight;
         offset = r.offset;
         more = r.more;
@@ -316,7 +316,7 @@ function remoteLog(id, task){
         if (!alive(my)) return;
         if (r.reset) out.textContent = '';
         const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
-        if (r.text) out.append(r.text);
+        if (r.text) out.insertAdjacentHTML('beforeend', ansiHTML(r.text));
         if (out.textContent.length > 4e6) out.textContent = out.textContent.slice(-2e6);   // 页面里最多留约 2MB
         if (atBottom) out.scrollTop = out.scrollHeight;
         offset = r.offset; more = r.more;
