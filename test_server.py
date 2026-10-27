@@ -73,6 +73,39 @@ class ClearHostTest(unittest.TestCase):
         self.assertEqual(sleeps, [5] * 36)
         signal.assert_called_once()
 
+    def test_container_pids_stopped_via_docker(self):
+        # 占卡进程属于容器时: 不再逐个 SIGKILL, 而是 docker stop 整个容器.
+        # 先把 exec 脚本要 import 的模块都 import 好: exec 期间 builtins.open 已被替换,
+        # import 机制读不到真文件会卡死
+        import xml.etree.ElementTree  # noqa: F401
+
+        cgroup = "0::/docker/0123456789abcdef" + "0" * 48 + "\n"
+        state = {"docker": []}
+
+        def run(argv, **kw):
+            if argv[0] == "docker":
+                state["docker"].append(argv[1:])
+                return CompletedProcess([], 0, stdout="0123456789abcdef" + "0" * 48 + " myjob\n" if argv[1] == "ps" else "")
+            pids = [] if state["docker"] else [101]   # docker stop 后容器里的进程随命名空间消失
+            xml = '<nvidia_smi_log><gpu><processes>' + ''.join(
+                f'<process_info><pid>{p}</pid></process_info>' for p in pids) + '</processes></gpu></nvidia_smi_log>'
+            return CompletedProcess([], 0, stdout=xml)
+        output = io.StringIO()
+        with patch.object(server.subprocess, "run", side_effect=run), \
+                patch("builtins.open", lambda p, *a, **k: io.StringIO(cgroup) if str(p).endswith("cgroup") else io.StringIO()), \
+                patch("os.pidfd_open", create=True, side_effect=lambda pid: pid), patch("os.close"), \
+                patch("signal.pidfd_send_signal", create=True) as signal, \
+                patch("time.sleep", lambda s: None), patch("time.monotonic", side_effect=lambda: 0), \
+                patch("sys.stdout", output):
+            exec(shlex.split(server.CLEAR_CMD)[2], {})
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["stopped"], ["myjob"])     # 报容器名
+        self.assertEqual(result["killed"], [])             # 容器内进程不再单独杀
+        signal.assert_not_called()
+        self.assertEqual(state["docker"][0][0], "ps")
+        self.assertEqual(state["docker"][1], ["stop", "-t", "0", "0123456789abcdef" + "0" * 48])
+
     def test_invalid_pid_stops_without_signals(self):
         for pid in ('1', '-1', '101;echo bad', 'N/A'):
             with self.subTest(pid=pid):

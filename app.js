@@ -322,6 +322,7 @@ $('#root').addEventListener('click', async e => {
       const response = await fetch('/api/hosts/clear', {method:'POST', headers:{'Content-Type':'application/json', 'X-GPUMon-Token':clearToken}, body:JSON.stringify({host, confirmation})});
       const d = await response.json();
       const messages = [`${host}：${d.ok ? '已清空' : '未完全清空'}`];
+      if (d.stopped?.length) messages.push(`已停止容器：${d.stopped.join(', ')}`);
       if (d.killed) messages.push(`已发送强制终止：${d.killed.length} 个进程`);
       if (d.failed?.length) messages.push('终止失败：' + d.failed.map(p => `PID ${p.pid}: ${p.error}`).join('；'));
       if (d.remaining?.length) messages.push('仍在占卡：PID ' + d.remaining.join(', '));

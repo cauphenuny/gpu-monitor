@@ -69,12 +69,13 @@ SSH_TIMEOUT = 25
 CLEAR_CMD = "python3 -c " + shlex.quote(r'''
 import json
 import os
+import re
 import signal
 import subprocess
 import time
 import xml.etree.ElementTree as ET
 
-result = {"ok": False, "killed": [], "failed": [], "remaining": [], "error": None}
+result = {"ok": False, "killed": [], "failed": [], "remaining": [], "stopped": [], "error": None}
 handles = {}
 
 def gpu_pids():
@@ -98,10 +99,36 @@ try:
             pass
         except OSError as exc:
             result["failed"].append({"pid": pid, "error": str(exc)})
-    # Pin process identities, then recheck GPU membership before sending signals.
+    # 占卡的进程若属于容器, 先 docker stop -t 0 (SIGKILL): PID 1 一死内核对整个
+    # 命名空间发 SIGKILL, 整个容器一起干净地掉, 避免幸存组件 SIGQUIT 自杀写 core
     current = gpu_pids() if handles else set()
+    cids, container_pids = {}, set()
+    for pid in current:
+        try:
+            with open(f"/proc/{pid}/cgroup") as f:
+                m = re.search(r"[0-9a-f]{64}", f.read())
+            if m:
+                cids[m.group(0)] = True
+                container_pids.add(pid)
+        except OSError:
+            pass
+    if cids:
+        try:
+            out = subprocess.run(["docker", "ps", "--no-trunc", "--format", "{{.ID}} {{.Names}}"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            names = dict(l.split(None, 1) for l in out.splitlines() if " " in l)
+        except Exception:
+            names = {}
+        for cid in cids:
+            name = names.get(cid, cid[:12])
+            try:
+                subprocess.run(["docker", "stop", "-t", "0", cid], capture_output=True, timeout=90)
+                result["stopped"].append(name)
+            except Exception as exc:
+                result["failed"].append({"pid": name, "error": f"docker stop: {exc}"})
+        current = gpu_pids()  # 容器里的进程随命名空间被 SIGKILL, 重查幸存的
     for pid, handle in handles.items():
-        if pid not in current:
+        if pid in container_pids or pid not in current:
             continue
         try:
             signal.pidfd_send_signal(handle, signal.SIGKILL)
