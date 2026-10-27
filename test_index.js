@@ -5,6 +5,7 @@ const assert = require('assert');
 const script = fs.readFileSync(`${__dirname}/app.js`, 'utf8');
 new vm.Script(script);
 const context = vm.createContext({localStorage: {getItem: () => null}});
+vm.runInContext(fs.readFileSync(`${__dirname}/common.js`, 'utf8'), context);
 vm.runInContext(script.split('function card(')[0] + `
 openGpus.add('host|GPU-test');
 globalThis.renderProc = p => gpuRow('host', {uuid: 'GPU-test', index: 0, procs: [p]});

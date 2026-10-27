@@ -1,5 +1,3 @@
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let entries = [], results = new Map(), lastUpdate = null, inFlight = false, timer = null;
 let disabled = new Map();   // host → 禁用原因
 let collapsedGroups = new Set(JSON.parse(localStorage.getItem('gpumon.collapsed') || '[]'));
@@ -10,7 +8,6 @@ const seenCards = new Set();     // 首次出现的卡片才做入场动画, 刷
 const revealedSparks = new Set();  // 曲线只淡入一次, 重绘不重播
 const justOpenedGroups = new Set(); // 分组刚展开时才播高度动画, 重绘不重播
 const justOpened = new Set();    // 只在刚展开的那一刻播高度动画, 之后的重绘不再重播
-const clearToken = '__GPUMON_CLEAR_TOKEN__';
 let refreshAfterClear = false;
 
 const midTrunc = (s, n = 46) => {
@@ -22,14 +19,6 @@ const midTrunc = (s, n = 46) => {
 const fmtMiB = v => v == null ? '--' : v >= 1024 ? (v/1024).toFixed(1)+' GB' : Math.round(v)+' MB';
 const fmtG = v => v == null ? '--' : (v/1024).toFixed(1);
 const fpct = v => v == null ? '--' : Math.round(v)+'%';
-function fmtDuration(seconds){
-  if (!Number.isFinite(seconds) || seconds < 0) return '--';
-  const s = Math.floor(seconds);
-  if (s >= 86400) return Math.floor(s/86400)+'天'+Math.floor(s%86400/3600)+'小时';
-  if (s >= 3600) return Math.floor(s/3600)+'小时'+Math.floor(s%3600/60)+'分';
-  if (s >= 60) return Math.floor(s/60)+'分'+s%60+'秒';
-  return s+'秒';
-}
 const cls = p => p == null ? 'na' : p < 50 ? 'ok' : p < 80 ? 'warn' : 'hot';
 const sortMode = () => document.querySelector('#sortSeg .on')?.dataset.sort || 'manual';
 function bar(p){
@@ -38,39 +27,6 @@ function bar(p){
 }
 
 
-/* ---- 统一弹窗: 原生 <dialog>, 自带遮罩/Esc/焦点管理 ---- */
-function modal({title, desc = '', input = false, value = '', ok = '确定', cancel = true, danger = false}){
-  if (!document?.createElement)   // 无 DOM 环境 (测试桩/极简宿主) 退回原生对话框
-    return Promise.resolve(input ? prompt(title + (desc ? '\n' + desc : ''), value)
-      : danger && !confirm(title + (desc ? '\n' + desc : '')) ? false : true);
-  return new Promise(resolve => {
-    const dlg = document.createElement('dialog');
-    dlg.className = 'dlg';
-    dlg.innerHTML = `<div class="dlg-t">${esc(title)}</div>
-      ${desc ? `<div class="dlg-d">${esc(desc).replace(/\n/g, '<br>')}</div>` : ''}
-      ${input ? `<input class="dlg-i" name="value" value="${esc(value)}" spellcheck="false" autocomplete="off">` : ''}
-      <div class="dlg-a">${cancel ? '<button type="button" class="ghost" data-no>取消</button>' : ''}
-        <button type="button" class="${danger ? 'danger' : 'primary'}" data-yes>${esc(ok)}</button></div>`;
-    const done = v => {
-      if (!dlg.open) return resolve(v);
-      dlg.classList.add('out');
-      setTimeout(() => { dlg.close(); resolve(v); }, 180);
-    };
-    const val = () => input ? dlg.querySelector('.dlg-i').value : true;
-    dlg.querySelector('[data-no]')?.addEventListener('click', () => done(input ? null : false));
-    dlg.querySelector('[data-yes]').addEventListener('click', () => done(val()));
-    dlg.addEventListener('cancel', e => { e.preventDefault(); done(input ? null : false); });
-    dlg.addEventListener('close', () => dlg.remove());
-    document.body.appendChild(dlg);
-    dlg.showModal();
-    const i = dlg.querySelector('.dlg-i');
-    if (i){ i.focus(); i.select(); i.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); done(val()); } }); }
-    else dlg.querySelector('[data-yes]').focus();
-  });
-}
-const notify = (title, desc = '') => document?.createElement
-  ? modal({title, desc, ok: '知道了', cancel: false})
-  : (alert(title + (desc ? '\n' + desc : '')), Promise.resolve());
 
 function gpuRow(host, g){
   const key = host + '|' + (g.uuid || g.index);
@@ -215,8 +171,7 @@ function tally(hostList){
     if (disabled.has(h)) continue;   // 禁用机器的卡不计入忙闲, 免得被当成空闲卡
     for (const g of r.gpus){
       total++;
-      const mp = (g.mem_total && g.mem_used != null) ? g.mem_used / g.mem_total * 100 : 0;
-      if ((g.util || 0) >= 5 || mp >= 10) busy++;
+      if (gpuBusy(g)) busy++;
     }
   }
   return {online, total, busy, idle: total - busy};
@@ -227,8 +182,7 @@ function hostStat(h){
   if (!r || !r.ok) return null;   // 未知/离线
   let busy = 0, idle = 0, maxUtil = 0;
   for (const g of r.gpus){
-    const mp = (g.mem_total && g.mem_used != null) ? g.mem_used / g.mem_total * 100 : 0;
-    const b = (g.util || 0) >= 5 || mp >= 10;
+    const b = gpuBusy(g);
     busy += b; idle += !b; maxUtil = Math.max(maxUtil, g.util || 0);
   }
   return {busy, idle, maxUtil};
@@ -311,6 +265,7 @@ async function refresh(){
     lastUpdate = Date.now();
     if (!isDragging) render();   // 拖拽中不重建 DOM, 拖完再渲染
     upd();
+    try{ sessionStorage.setItem('gpumon.status', JSON.stringify({results: [...results], lastUpdate})); }catch{}   // 从任务页切回时先显示这份
   }catch(e){
     $('#updated').textContent = '刷新失败';
   }finally{
@@ -592,7 +547,13 @@ setInterval(upd, 1000);
     document.querySelectorAll('#sortSeg [data-sort]').forEach(b => b.classList.toggle('on', b.dataset.sort === savedSort));
   }
   await loadHosts();
-  render();
+  try{   // 本标签页上次的结果 (Map 存为 [host, r] 数组), 先显示旧数据再后台刷新; 坏缓存忽略
+    const c = JSON.parse(sessionStorage.getItem('gpumon.status'));
+    if (Array.isArray(c?.results) && Number.isFinite(c.lastUpdate) && c.results.every(x => Array.isArray(x) && typeof x[0] === 'string' && x[1] && typeof x[1] === 'object')){
+      results = new Map(c.results); lastUpdate = c.lastUpdate;
+    }
+  }catch{}
+  render(); upd();
   refresh();
   setTimer(selVal());
 })();

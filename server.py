@@ -24,14 +24,21 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import tasks
+
 ROOT = Path(__file__).resolve().parent
 STATIC = {  # URL → (文件, Content-Type)
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/tasks": ("tasks.html", "text/html; charset=utf-8"),
+    "/common.js": ("common.js", "application/javascript; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+    "/tasks.js": ("tasks.js", "application/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
 CONFIG_FILE = ROOT / "hosts.json"
 CLEAR_TOKEN = secrets.token_urlsafe(32)
+# 监听本机时只认这些 Host 头, 防 DNS rebinding 读走页面令牌后起特权容器; None 表示不校验
+ALLOWED_HOSTS = None
 
 GPU_FIELDS = "index,uuid,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw"
 PROC_FIELDS = "gpu_uuid,pid,process_name,used_memory"
@@ -53,7 +60,8 @@ if [ -n "$gpumon_pids" ]; then
     ps -p "$(printf '%s\n' "$gpumon_pids" | paste -sd, -)" -o pid=,etimes= 2>/dev/null || true
 fi
 """
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-o", "StrictHostKeyChecking=accept-new"]
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "IgnoreUnknown=WarnWeakCrypto", "-o", "WarnWeakCrypto=no"]  # 屏蔽 OpenSSH 10.1+ 的 post-quantum 警告
 SSH_TIMEOUT = 25
 
 CLEAR_CMD = "python3 -c " + shlex.quote(r'''
@@ -169,6 +177,21 @@ def set_disabled(host, reason):
         data["disabled"] = d
         _write_config(data)
     return d
+
+
+def load_settings():
+    with _lock:
+        s = _read_config().get("settings")
+    s = s if isinstance(s, dict) else {}
+    return {"docker_prefix": str(s.get("docker_prefix") or "gpumon")}
+
+
+def save_settings(settings):
+    with _lock:
+        data = _read_config()
+        data["settings"] = settings
+        _write_config(data)
+    return settings
 
 
 def _num(s):
@@ -389,6 +412,14 @@ def clear_host(host):
         return {"ok": False, "error": "清空结果无法解析，部分任务可能已终止，请刷新确认"}
 
 
+def _bad_host(h):
+    """Host 头不在允许列表时回 403 并返回 True."""
+    if ALLOWED_HOSTS is None or h.headers.get("Host", "").lower() in ALLOWED_HOSTS:
+        return False
+    Handler._json(h, {"error": "Host 不在允许列表，经反向代理访问请用 --allow-host 添加"}, 403)
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 安静模式, 刷新频繁不刷屏
         pass
@@ -412,6 +443,8 @@ class Handler(BaseHTTPRequestHandler):
         return {}
 
     def do_GET(self):
+        if _bad_host(self):
+            return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         if path in STATIC:
@@ -443,11 +476,75 @@ class Handler(BaseHTTPRequestHandler):
             if not any(e["host"] == host for e in load_entries()):
                 return self._json({"error": "主机未配置"}, 400)
             self._json({"host": host, "gpus": gpu_history(host, minutes or None)})
+        elif path == "/api/tasks":
+            tid = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+            if not tid:
+                return self._json({"tasks": tasks.list_tasks()})
+            try:
+                self._json(tasks.get(tid))
+            except tasks.TaskError as e:
+                self._json({"error": str(e)}, 404)
+        elif path == "/api/tasks/log":
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                offset = int((qs.get("offset") or ["-1"])[0])
+                self._json(tasks.read_log((qs.get("id") or [""])[0], (qs.get("which") or [""])[0], offset,
+                                          (qs.get("level") or [""])[0] == "debug"))
+            except ValueError:
+                self._json({"error": "offset 无效"}, 400)
+            except tasks.TaskError as e:
+                self._json({"error": str(e)}, 404)
+        elif path in ("/api/tasks/files", "/api/tasks/tail"):
+            qs = urllib.parse.parse_qs(parsed.query)
+            tid, fpath = (qs.get("id") or [""])[0], (qs.get("path") or [""])[0]
+            try:
+                if path == "/api/tasks/files":
+                    self._json(tasks.list_files(tid, fpath))
+                else:
+                    self._json(tasks.read_remote(tid, fpath, int((qs.get("offset") or ["-1"])[0])))
+            except ValueError:
+                self._json({"error": "offset 无效"}, 400)
+            except tasks.TaskError as e:
+                self._json({"error": str(e)}, 400)
+        elif path == "/api/settings":
+            self._json(load_settings())
         else:
             self._json({"error": "not found"}, 404)
 
+    def _token_ok(self):
+        token = self.headers.get("X-GPUMon-Token", "").encode()
+        return secrets.compare_digest(token, CLEAR_TOKEN.encode())
+
+    def _task_post(self, path):
+        """任务/设置接口: 会在远端起特权容器跑任意命令, 必须带页面令牌防跨站触发."""
+        if not self._token_ok():
+            return self._json({"error": "校验失败，请刷新页面后重试"}, 403)
+        body = self._body()
+        if not isinstance(body, dict):
+            return self._json({"error": "请求必须是 JSON 对象"}, 400)
+        try:
+            if path == "/api/tasks":
+                cfg = tasks.validate(body.get("config"), {e["host"] for e in load_entries()})
+                return self._json(tasks.create(body.get("name"), body.get("note"), cfg,
+                                               load_settings()["docker_prefix"]))
+            if path == "/api/tasks/rename":
+                return self._json(tasks.rename(body.get("id"), body.get("name")))
+            if path == "/api/tasks/stop":
+                t, errs = tasks.stop(body.get("id"))
+                return self._json({"task": t, "errors": errs})
+            prefix = str(body.get("docker_prefix") or "").strip()
+            if not tasks.PREFIX_RE.fullmatch(prefix):
+                raise tasks.TaskError("前缀只能含字母、数字、_ . -，以字母或数字开头，最长 40 字符")
+            self._json(save_settings({**load_settings(), "docker_prefix": prefix}))
+        except tasks.TaskError as e:
+            self._json({"error": str(e)}, 400)
+
     def do_POST(self):
+        if _bad_host(self):
+            return
         path = urllib.parse.urlparse(self.path).path
+        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/settings"):
+            return self._task_post(path)
         if path == "/api/hosts/clear":
             if self.headers.get_content_type() != "application/json":
                 return self._json({"ok": False, "error": "清空请求格式错误，请刷新页面后重试"}, 400)
@@ -520,6 +617,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_DELETE(self):
+        if _bad_host(self):
+            return
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         if parsed.path == "/api/hosts":
@@ -533,6 +632,14 @@ class Handler(BaseHTTPRequestHandler):
             entries = [e for e in load_entries() if e["group"] != group]
             save_entries(entries)
             self._json({"hosts": entries})
+        elif parsed.path == "/api/tasks":
+            if not self._token_ok():
+                return self._json({"error": "校验失败，请刷新页面后重试"}, 403)
+            try:
+                tasks.delete((qs.get("id") or [""])[0])
+                self._json({"ok": True})
+            except tasks.TaskError as e:
+                self._json({"error": str(e)}, 400)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -541,6 +648,8 @@ def main():
     ap = argparse.ArgumentParser(description="GPU 监控网页")
     ap.add_argument("--bind", default="127.0.0.1", help="监听地址 (默认 127.0.0.1, 仅本机可访问)")
     ap.add_argument("--port", type=int, default=8799)
+    ap.add_argument("--allow-host", action="append", default=[], metavar="HOST[:PORT]",
+                    help="监听本机时额外允许的 Host 头 (经反向代理访问时用), 可重复")
     sub = ap.add_subparsers(dest="cmd")
     q = sub.add_parser("query", help="直接查询 GPU 状态并输出 JSON (供 agent/脚本调用), 不启动服务")
     q.add_argument("group", nargs="?", help="分组名 (如 H200, 忽略大小写); 省略则查询全部主机")
@@ -550,7 +659,12 @@ def main():
         out = query_group(args.group, args.brief)
         print(json.dumps(out, indent=2, ensure_ascii=False))
         raise SystemExit(0 if out["ok"] else 1)
+    global ALLOWED_HOSTS
+    if args.bind in ("127.0.0.1", "localhost", "::1"):
+        ALLOWED_HOSTS = {f"{h}:{args.port}" for h in ("127.0.0.1", "localhost", "[::1]")}
+        ALLOWED_HOSTS |= {h.lower() for h in args.allow_host}
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)
+    tasks.recover()
     shown = args.bind if args.bind not in ("0.0.0.0", "::") else "127.0.0.1"
     print("GPU Monitor 已启动: http://%s:%d  (Ctrl+C 退出)" % (shown, args.port))
     print("提示: 在网页中添加的主机需可免密 ssh 登录 (ssh <host> 不提示输密码), 且装有 nvidia-smi")

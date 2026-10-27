@@ -65,13 +65,15 @@ header{
   background:linear-gradient(180deg,#26333f,#202a35);color:var(--accent);font-weight:600;
   box-shadow:inset 0 0 0 1px rgba(var(--accent-rgb),.18);
 }
-button{
+button,a.btn{
   background:#1a222b;color:var(--text);border:1px solid var(--line);border-radius:var(--r-ctl);
   padding:6px 12px;cursor:pointer;font-size:13px;transition:border-color .15s, background .15s, color .15s, transform .1s;
 }
-button:hover{border-color:var(--accent);background:#1f2833}
-button:active{transform:translateY(1px)}
-button:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(var(--accent-rgb),.25)}
+a.btn{display:inline-block;text-decoration:none;line-height:normal}
+button:hover,a.btn:hover{border-color:var(--accent);background:#1f2833}
+button:active,a.btn:active{transform:translateY(1px)}
+button:focus-visible,a.btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(var(--accent-rgb),.25)}
+button:disabled{opacity:.5;cursor:default}
 .sel{position:relative}
 .sel-btn{
   display:flex;align-items:center;gap:8px;min-width:88px;justify-content:space-between;
@@ -242,9 +244,115 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(var(--accent-rgb),.2
 .dlg-i:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
 .dlg-a{display:flex;justify-content:flex-end;gap:8px;padding:16px 18px}
 .dlg button{padding:6px 14px;font-size:12.5px}
-.dlg .ghost{background:transparent;border-color:var(--line);color:var(--muted)}
-.dlg .ghost:hover{color:var(--text);border-color:#313c49}
-.dlg .primary{background:rgba(var(--accent-rgb),.14);border-color:rgba(var(--accent-rgb),.35);color:#bfe8fb}
-.dlg .primary:hover{background:rgba(var(--accent-rgb),.22)}
-.dlg .danger{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.35);color:#ffb4b4}
-.dlg .danger:hover{background:rgba(248,113,113,.2)}
+/* 按钮语气: 弹窗与任务页共用 */
+.ghost{background:transparent;border-color:var(--line);color:var(--muted)}
+.ghost:hover{color:var(--text);border-color:#313c49;background:transparent}
+.primary{background:rgba(var(--accent-rgb),.14);border-color:rgba(var(--accent-rgb),.35);color:#bfe8fb}
+.primary:hover{background:rgba(var(--accent-rgb),.22)}
+.danger{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.35);color:#ffb4b4}
+.danger:hover{background:rgba(248,113,113,.2);border-color:rgba(248,113,113,.5)}
+
+/* ---- 顶栏导航 & 任务页: 复用监控页的 card / 控件 / chip 三级圆角 ---- */
+.nav{display:flex;gap:2px;background:#101519;border:1px solid var(--line);border-radius:var(--r-ctl);padding:2px}
+.nav a{color:var(--muted);text-decoration:none;font-size:12px;line-height:1.4;padding:4px 11px;border-radius:var(--r-chip);transition:color .2s, background .2s}
+.nav a:hover{color:var(--text);background:rgba(255,255,255,.04)}
+.nav a.on{background:linear-gradient(180deg,#26333f,#202a35);color:var(--accent);font-weight:600;box-shadow:inset 0 0 0 1px rgba(var(--accent-rgb),.18)}
+a{color:var(--accent)}
+.btn.sm{padding:3px 9px;font-size:12px}
+.panel{background:linear-gradient(180deg,#161d28 0%,#121822 100%);border:1px solid var(--line);border-radius:var(--r)}
+main.tasks{padding:16px 22px 44px;max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+#taskHead,.logbox{display:flex;flex-direction:column;gap:14px}
+.mono,.tasks pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.sub{color:var(--faint);font-size:11.5px;margin-top:2px}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden}
+.tbl th{text-align:left;font-weight:500;color:var(--faint);font-size:12px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.tbl td{padding:8px 12px;border-top:1px solid var(--line-soft);vertical-align:top;font-size:13px}
+.tbl tbody tr:first-child td{border-top:none}
+.tbl tbody tr:hover{background:linear-gradient(90deg,rgba(var(--accent-rgb),.05),transparent 70%)}
+.tbl td a:not(.btn){text-decoration:none;font-weight:600}
+.tbl .hosts{font-size:12px;color:var(--muted)}
+.tbl .acts{text-align:right;white-space:nowrap}
+.badge{display:inline-block;font-size:11px;line-height:1.6;padding:0 7px;border-radius:var(--r-chip);border:1px solid var(--line-soft);
+  color:var(--muted);background:rgba(255,255,255,.03);white-space:nowrap}
+.badge.ok{color:var(--ok);border-color:rgba(74,222,128,.22);background:rgba(74,222,128,.08)}
+.badge.warn{color:var(--warn);border-color:rgba(251,191,36,.22);background:rgba(251,191,36,.08)}
+.badge.hot{color:var(--hot);border-color:rgba(248,113,113,.22);background:rgba(248,113,113,.08)}
+.badge.done{color:var(--accent);border-color:rgba(var(--accent-rgb),.22);background:rgba(var(--accent-rgb),.08)}
+.form{display:flex;flex-direction:column;gap:14px;max-width:960px;padding:14px 16px 16px}
+.form-h{display:flex;align-items:center;gap:10px}
+.form-h h2{margin:0;font-size:15px;font-weight:700;letter-spacing:.2px;color:#d8e1ee}
+.back{color:var(--muted);text-decoration:none;font-size:12.5px}
+.back:hover{color:var(--text)}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>span{font-size:12.5px;color:#c7d0dd;font-weight:600}
+.field small{font-weight:400;color:var(--faint);margin-left:6px}
+.field input,.field textarea{background:#101519;border:1px solid var(--line);color:var(--text);border-radius:var(--r-ctl);
+  padding:6px 10px;font:inherit;font-size:13px;outline:none;resize:vertical;transition:border-color .24s, box-shadow .24s, background .24s}
+.field input:hover,.field textarea:hover{border-color:#313c49;background:#11171d}
+.field .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.field textarea.mono{line-height:1.5;tab-size:4}
+.field input:focus,.field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
+.form-a{display:flex;justify-content:flex-end;gap:8px}
+#hostPick{display:flex;flex-direction:column;gap:8px}
+.pick-g{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pick-gn{font-size:12px;color:var(--faint);min-width:64px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;font-size:12.5px;color:var(--muted);background:#101519}
+.chip:hover{border-color:#313c49;background:#11171d;color:var(--text)}
+.chip.on{color:var(--text);border-color:rgba(var(--accent-rgb),.45);background:rgba(var(--accent-rgb),.1)}
+.chip b{font-size:11px;color:var(--accent);font-variant-numeric:tabular-nums}
+.chip.head{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.09)}
+.chip.head b{color:var(--ok)}
+.load{display:inline-flex;align-items:center;gap:2px;margin-left:2px}
+.load s{width:6px;height:10px;border-radius:2px;background:var(--ok);opacity:.75}
+.load s.busy{background:var(--warn)}
+.load small{font-size:10.5px;color:var(--faint);margin-left:4px;font-variant-numeric:tabular-nums}
+.load.off{font-size:10.5px;color:var(--faint)}
+.tasks .ban{white-space:normal;font-size:12.5px;padding:8px 12px;border:1px solid rgba(248,113,113,.28);border-radius:var(--r-ctl);background:rgba(248,113,113,.06)}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:8px 18px;padding:12px 14px;font-size:13px}
+.kv>div{min-width:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px;align-items:baseline}   /* 标签一列、值一列, 值过长只在自己那列换行 */
+.kv .wide{grid-column:1/-1}
+.kv span{color:var(--faint);font-size:12px;white-space:nowrap}
+.kv b{font-weight:inherit;overflow-wrap:anywhere}
+.kv small{color:var(--faint);white-space:nowrap}
+details#cfg{padding:9px 14px}
+details#cfg[open]{padding-bottom:14px}
+details#cfg summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+details#cfg summary:hover{color:var(--text)}
+.cfg-l{color:var(--faint);font-size:12px;margin:12px 0 5px}
+.tasks pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#c7d0dd}
+details#cfg pre{background:#101519;border:1px solid var(--line-soft);border-radius:var(--r-ctl);padding:8px 10px;max-height:320px;overflow:auto}
+.log-h{display:flex;align-items:center;gap:10px}
+.log{height:62vh;overflow:auto;padding:10px 12px;line-height:1.5}
+.form-h .btn{padding:4px 10px;font-size:12px}
+h2.rename{cursor:text;border-bottom:1px dashed transparent;transition:border-color .15s}
+h2.rename:hover{border-bottom-color:var(--faint)}
+.mini-tbl{width:100%;border-collapse:collapse;background:#0e1318;border:1px solid var(--line-soft);border-radius:var(--r-ctl);overflow:hidden;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.mini-tbl th{white-space:nowrap;text-align:left;font-weight:500;color:var(--faint);font-family:inherit;padding:5px 10px;border-bottom:1px solid var(--line-soft)}
+.mini-tbl td{padding:5px 10px;border-top:1px solid var(--line-soft);color:#c7d0dd;overflow-wrap:anywhere;vertical-align:top}
+.mini-tbl td:first-child{white-space:nowrap;width:1%}
+.log-h .seg[hidden]{display:none}
+.sec-t{font-size:13px;font-weight:700;color:#d8e1ee;white-space:nowrap}
+.rpath{display:flex;gap:6px;flex:1;max-width:560px}
+.inp{flex:1;min-width:0;background:#101519;border:1px solid var(--line);color:var(--text);border-radius:var(--r-ctl);padding:6px 10px;
+  font-size:12px;outline:none;transition:border-color .24s, box-shadow .24s, background .24s}
+.inp:hover{border-color:#313c49;background:#11171d}
+.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.13)}
+.rfiles{display:flex;flex-wrap:wrap;gap:6px}
+.rfiles:empty{display:none}
+.rfiles .chip small{font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+#rbox.off{opacity:.55}
+.log-cap{font-size:12px;color:var(--warn);display:flex;align-items:center;gap:8px}
+.log-cap[hidden]{display:none}
+.log-cap .btn{padding:3px 9px;font-size:12px}
+.fs-wrap{position:relative;display:flex}
+.fs-wrap textarea{flex:1}
+.fs-btn{position:absolute;top:6px;right:6px;width:26px;height:26px;padding:0;display:flex;align-items:center;justify-content:center;
+  background:#151c24;color:var(--muted);border-radius:var(--r-chip)}
+.fs-btn:hover{color:var(--text)}
+.fs-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.fs-btn .off,.fs-wrap.fs .fs-btn .on{display:none}
+.fs-wrap.fs .fs-btn .off{display:inline}
+.fs-wrap.fs{position:fixed;inset:0;z-index:40;padding:16px;background:var(--bg)}
+.fs-wrap.fs textarea{resize:none}
+.fs-wrap.fs .fs-btn{top:22px;right:22px}

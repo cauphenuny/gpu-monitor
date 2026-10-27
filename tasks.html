@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务 · GPU Monitor</title>
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23141a23'/%3E%3Crect x='6' y='9' width='20' height='13' rx='2.5' fill='none' stroke='%237ab3ff' stroke-width='2'/%3E%3Cpath d='M11 25h10' stroke='%237ab3ff' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='15.5' r='2.4' fill='%233ddc97'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="8" width="22" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M11 26h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="16" cy="15" r="2.6" fill="var(--ok)"/></svg>GPU Monitor</div>
+  <nav class="nav"><a href="/">监控</a><a href="/tasks" class="on">任务</a></nav>
+  <div class="spacer"></div>
+  <a class="btn" href="#new">＋ 新建任务</a>
+  <button id="settingsBtn" type="button">设置</button>
+</header>
+<main id="view" class="tasks"></main>
+
+<script src="/common.js"></script>
+<script src="/tasks.js"></script>
+</body>
+</html>

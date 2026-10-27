@@ -135,13 +135,13 @@ class ClearHostTest(unittest.TestCase):
                 self.assertEqual(clear.call_count, int(expected == 200))
 
     def test_page_contains_current_token(self):
-        for path in ('/', '/app.js', '/style.css'):
+        for path in ('/', '/tasks', '/common.js', '/app.js', '/tasks.js', '/style.css'):
             handler = SimpleNamespace(path=path, send_response=Mock(), send_header=Mock(),
                                       end_headers=Mock(), wfile=io.BytesIO())
             server.Handler.do_GET(handler)
             page = handler.wfile.getvalue()
             self.assertNotIn(b'__GPUMON_CLEAR_TOKEN__', page)
-        handler = SimpleNamespace(path='/app.js', send_response=Mock(), send_header=Mock(),
+        handler = SimpleNamespace(path='/common.js', send_response=Mock(), send_header=Mock(),
                                   end_headers=Mock(), wfile=io.BytesIO())
         server.Handler.do_GET(handler)
         self.assertIn(server.CLEAR_TOKEN.encode(), handler.wfile.getvalue())
