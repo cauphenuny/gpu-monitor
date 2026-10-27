@@ -586,6 +586,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({**r, "restarting": restarting})
             if path == "/api/tasks/rename":
                 return self._json(tasks.rename(body.get("id"), body.get("name")))
+            if path == "/api/tasks/note":
+                return self._json(tasks.set_note(body.get("id"), body.get("note")))
             if path == "/api/tasks/stop":
                 t, errs = tasks.stop(body.get("id"))
                 return self._json({"task": t, "errors": errs})
@@ -600,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
         if _bad_host(self):
             return
         path = urllib.parse.urlparse(self.path).path
-        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/settings", "/api/update"):
+        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/tasks/note", "/api/settings", "/api/update"):
             return self._task_post(path)
         if path == "/api/hosts/clear":
             if self.headers.get_content_type() != "application/json":

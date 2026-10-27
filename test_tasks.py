@@ -237,6 +237,8 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(tasks.rename(tid, "  new name ")["name"], "new name")
         with self.assertRaises(tasks.TaskError):
             tasks.rename(tid, " ")
+        self.assertEqual(tasks.set_note(tid, "  epd, dp8 ")["note"], "  epd, dp8 ")
+        self.assertEqual(tasks.set_note(tid, "")["note"], "")   # 空串清除
 
     def test_recover_marks_interrupted_launch(self):
         _, ssh = self.fake_ssh()

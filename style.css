@@ -326,6 +326,8 @@ details#cfg pre{background:#101519;border:1px solid var(--line-soft);border-radi
 .log{height:62vh;overflow:auto;padding:10px 12px;line-height:1.5}
 .form-h .btn{padding:4px 10px;font-size:12px}
 h2.rename{cursor:text;border-bottom:1px dashed transparent;transition:border-color .15s}
+.kv b.edit{cursor:text;border-bottom:1px dashed transparent;transition:border-color .15s}
+.kv b.edit:hover{border-bottom-color:var(--faint)}
 h2.rename:hover{border-bottom-color:var(--faint)}
 .mini-tbl{width:100%;border-collapse:collapse;background:#0e1318;border:1px solid var(--line-soft);border-radius:var(--r-ctl);overflow:hidden;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}

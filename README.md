@@ -124,6 +124,7 @@ python3 server.py query H200 --brief   # 精简输出, HTTP 等价于 /api/statu
 - `GET /api/tasks/tail?id=..&path=..&offset=..` — 增量读 head 容器内的文件，用法同 `/api/tasks/log`；`offset<0` 读最后 64KB；文件被截断或轮转时返回 `reset: true` 并从头读
 - `POST /api/update` — 任务页「更新」按钮：在服务目录执行 `git pull --ff-only`，拉到新代码后服务用 `execv` 重新执行自己（同样的端口/参数），失败时返回 git 输出且不重启
 - `POST /api/tasks/rename` `{"id":..,"name":..}` — 修改任务名称（详情页点击名称）
+- `POST /api/tasks/note` `{"id":..,"note":..}` — 修改备注（详情页点击备注，空串清除）
 - `POST /api/tasks/stop` `{"id":..}` — 删除所有主机上的容器，返回 `{"task":..,"errors":[..]}`
 - `DELETE /api/tasks?id=..` — 删除任务记录和日志；任务进行中或容器未删除时返回 400
 - `GET /api/settings` 返回 `{"docker_prefix":..}`；`POST /api/settings` `{"docker_prefix":..}` 修改容器名前缀

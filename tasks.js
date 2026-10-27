@@ -181,7 +181,7 @@ function taskHead(t, cfgOpen){
       <div class="wide"><span>镜像</span><b>${esc(t.config.image)}</b></div>
       <div><span>创建</span><b>${fmtTime(t.created)}</b></div><div><span>entrypoint 启动</span><b>${fmtTime(t.started)}</b></div>
       <div><span>结束</span><b>${fmtTime(t.ended)}</b></div><div><span>运行时长</span><b id="runFor"></b></div>
-      ${t.note ? `<div class="wide"><span>备注</span><b>${esc(t.note)}</b></div>` : ''}
+      <div class="wide"><span>备注</span><b class="edit" data-act="note" title="点击修改备注">${t.note ? esc(t.note) : '—'}</b></div>
     </div>
     <table class="tbl panel nodes"><thead><tr><th>#</th><th>主机</th><th>${esc(t.config.ifname)} IP</th><th>GPU</th><th>状态</th></tr></thead><tbody>
       ${t.nodes.map((n, i) => `<tr><td>${i + 1}${i === 0 ? ' <span class="badge ok">head</span>' : ''}</td><td>${esc(n.host)}</td>
@@ -280,6 +280,12 @@ async function showTask(id){
       const name = await modal({title: '修改任务名称', input: true, value: t.name, ok: '保存'});
       if (name == null || name.trim() === t.name) return;
       try{ await post('/api/tasks/rename', {id, name}); }
+      catch(err){ return notify('修改失败', err.message); }
+      tick();
+    } else if (act === 'note'){
+      const note = await modal({title: '修改备注', input: true, value: t.note || '', ok: '保存'});
+      if (note == null || note === (t.note || '')) return;
+      try{ await post('/api/tasks/note', {id, note}); }
       catch(err){ return notify('修改失败', err.message); }
       tick();
     } else if (act === 'stop'){

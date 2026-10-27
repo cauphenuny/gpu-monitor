@@ -462,6 +462,11 @@ def rename(tid, name):
     return update(tid, name=_name(name))
 
 
+def set_note(tid, note):
+    """备注可任意文本, 空串表示清除."""
+    return update(tid, note=str(note or ""))
+
+
 def create(name, note, cfg, prefix):
     name = _name(name)
     if not PREFIX_RE.fullmatch(prefix):
