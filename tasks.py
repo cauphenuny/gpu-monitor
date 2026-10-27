@@ -71,7 +71,6 @@ if ! command -v sshd >/dev/null && [ ! -x /usr/sbin/sshd ]; then
 fi
 mkdir -p /run/sshd && ssh-keygen -A >/dev/null
 env | grep -vE '^(HOME|HOSTNAME|PWD|OLDPWD|SHLVL|_|https?_proxy|HTTPS?_PROXY)=' > /root/.ssh/environment
-env | grep -vE '^(HOME|HOSTNAME|PWD|OLDPWD|SHLVL|_)=' > /root/.ssh/environment
 echo "[setup] 启动 sshd {ip}:{port}" >&2
 /usr/sbin/sshd -p {port} -o ListenAddress={ip} -o PermitRootLogin=prohibit-password -o PermitUserEnvironment=yes -o UsePAM=no -o MaxStartups=200
 """
