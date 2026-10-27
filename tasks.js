@@ -17,7 +17,12 @@ const post = (url, body) => api(url, {method: 'POST', body: JSON.stringify(body)
 const getTask = id => api('/api/tasks?id=' + encodeURIComponent(id));
 const fmtBytes = n => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
 const fmtTime = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN', {hour12: false}) : '--';
-const badge = s => `<span class="badge ${STATUS[s]?.[1] || ''}">${STATUS[s]?.[0] || esc(s)}</span>`;
+// 失败分两种: 容器还在的 (现场可查, 红色) 和容器已清理的 (只剩记录, 用已停止的灰色)
+const badge = t => {
+  const s = typeof t === 'string' ? t : t.status;
+  const cls = s === 'failed' && t?.containers_up === false ? '' : STATUS[s]?.[1] || '';
+  return `<span class="badge ${cls}">${STATUS[s]?.[0] || esc(s)}</span>`;
+};
 const runFor = t => t.started ? fmtDuration((t.ended || Date.now() / 1000) - t.started) : '--';
 
 // 全屏: 任何 .fs-wrap 里放一个 fsBtn, 点一下铺满窗口, 再点或 Esc 退回
@@ -55,7 +60,7 @@ async function showList(){
   $('#view').innerHTML = tasks.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
     <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr>
       <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
-      <td>${badge(t.status)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
+      <td>${badge(t)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
     : '<div class="hint">还没有任务，点右上角「新建任务」</div>';
@@ -171,7 +176,7 @@ function taskHead(t, cfgOpen){
   const live = t.containers_up || ACTIVE.includes(t.status);
   const pre = (label, text) => text.trim() ? `<div class="cfg-l">${label}</div><pre>${esc(text)}</pre>` : '';
   const env = envRows(t.config.env), mounts = mountRows(t.config.mounts);
-  return `<div class="form-h"><a href="#" class="back">‹ 任务</a><h2 class="rename" data-act="rename" title="点击修改名称">${esc(t.name)}</h2>${badge(t.status)}<span class="gspace"></span>
+  return `<div class="form-h"><a href="#" class="back">‹ 任务</a><h2 class="rename" data-act="rename" title="点击修改名称">${esc(t.name)}</h2>${badge(t)}<span class="gspace"></span>
       <a class="btn" href="#new/${t.id}">复制</a>
       ${live ? '<button type="button" class="btn danger" data-act="stop">停止</button>' : '<button type="button" class="btn" data-act="del">删除</button>'}</div>
     ${t.error ? `<div class="ban">${esc(t.error)}</div>` : ''}
