@@ -132,12 +132,5 @@
       "host": "root@172.19.128.206",
       "group": "B300 (Platform)"
     }
-  ],
-  "disabled": {
-    "zp-h200-007": "TileRT",
-    "zp-h200-025": "TileRT",
-    "zp-h200-026": "TileRT",
-    "zp-h200-030": "算子开发",
-    "zp-h200-008": "TileRT"
-  }
+  ]
 }

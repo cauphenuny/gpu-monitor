@@ -67,7 +67,7 @@ nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=c
 { "hosts": [ {"host": "lab-gpu-01", "group": "机房1"}, {"host": "lab-gpu-02", "group": "机房1"} ] }
 ```
 
-旧版本的纯主机名列表格式会在读取时自动迁移，无需手动处理。
+`hosts.json` 不纳入 git（含禁用原因等运行时数据）。没有该文件时从空列表开始；想用现成的主机列表可先 `cp example/hosts.json hosts.json`。旧版本的纯主机名列表格式会在读取时自动迁移，无需手动处理。
 
 ### 任务
 
@@ -138,5 +138,6 @@ python3 server.py query H200 --brief   # 精简输出, HTTP 等价于 /api/statu
 - `tasks.js` — 任务页前端逻辑
 - `common.js` — 两个页面共用的工具函数和弹窗
 - `test_tasks.py` — 任务模块的单元测试
-- `hosts.json` — 运行后自动生成的主机/分组配置和设置
+- `hosts.json` — 运行后自动生成的主机/分组配置、禁用记录和设置（已加入 `.gitignore`）
+- `example/hosts.json` — 示例主机列表，只有主机和分组
 - `tasks/` — 运行后自动生成的任务数据
