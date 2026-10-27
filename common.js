@@ -150,6 +150,26 @@ function ansiHTML(text){
   return out + open() + esc(text.slice(i)) + '</span>'.repeat(styles.length);
 }
 
+// 更新按钮 (两个页面顶栏共用): git pull 到新代码后服务会自替换重启, 这里轮询等服务回来再刷新页面
+globalThis.document?.getElementById?.('updateBtn')?.addEventListener('click', async () => {
+  if (!await modal({title: '更新并重启？', desc: '在服务目录执行 git pull，拉到新代码后自动重启服务，本页稍后自动刷新。运行中的任务不受影响（entrypoint 在容器里跑），但重启期间页面会短暂无响应。', ok: '更新', danger: true})) return;
+  let d;
+  try{
+    const r = await fetch('/api/update', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-GPUMon-Token': clearToken}});
+    d = await r.json();
+  }catch(e){ return notify('更新失败', e.message); }
+  if (!d.ok) return notify('git pull 失败', d.out);
+  if (!d.changed) return notify('已是最新代码，无需重启', d.out);
+  notify('已拉到新代码，服务重启中…', '页面稍后自动刷新。');
+  const t0 = Date.now();
+  (function wait(){
+    setTimeout(async () => {
+      try{ await fetch('/api/settings'); location.reload(); }
+      catch{ Date.now() - t0 < 30000 ? wait() : notify('服务 30 秒内没有回来', '请手动刷新页面确认。'); }
+    }, 1500);
+  })();
+});
+
 const notify = (title, desc = '') => document?.createElement
   ? modal({title, desc, ok: '知道了', cancel: false})
   : (alert(title + (desc ? '\n' + desc : '')), Promise.resolve());
