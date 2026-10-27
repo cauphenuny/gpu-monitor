@@ -43,7 +43,6 @@ document.addEventListener('keydown', e => {
 
 async function route(){
   clearTimeout(pollTimer);
-  scrollTo(0, 0);
   const h = decodeURIComponent(location.hash.slice(1));
   try{
     if (!h) await showList();
@@ -57,6 +56,7 @@ async function route(){
 async function showList(){
   const {tasks} = await api('/api/tasks');
   if (location.hash.slice(1)) return;
+  const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
   $('#view').innerHTML = tasks.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
     <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr>
       <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
@@ -64,6 +64,7 @@ async function showList(){
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
     : '<div class="hint">还没有任务，点右上角「新建任务」</div>';
+  window.scrollTo(0, y);
   if (tasks.some(t => ACTIVE.includes(t.status))) pollTimer = setTimeout(route, 5000);
 }
 
@@ -385,5 +386,5 @@ $('#settingsBtn').addEventListener('click', async () => {
     notify('保存失败', e.message);
   }
 });
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => { scrollTo(0, 0); route(); });   // 只有真切换页面才回顶; 列表轮询也走 route, 不能动滚动
 route();
