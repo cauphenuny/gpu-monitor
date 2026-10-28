@@ -16,17 +16,13 @@ async function api(url, opts = {}){
 }
 const post = (url, body) => api(url, {method: 'POST', body: JSON.stringify(body)});
 
-// 复用监控页 .sel 风格的下拉: wrap 会被填成 sel-btn + sel-menu; silent 置位时不触发 onChange
-function selDropdown(wrap, items, {value, onChange, title = ''} = {}){
+// 横向分段选择 (同监控页 .seg 风格): items 为 [{value,label}]
+function segControl(wrap, items, {value, onChange, title = ''} = {}){
   let val = value ?? items[0]?.value ?? '';
-  const label = () => items.find(i => i.value === val)?.label ?? '';
   const render = () => {
-    const open = wrap.classList.contains('open');
-    wrap.classList.add('sel');
+    wrap.classList.add('seg');
     wrap.title = title;
-    wrap.innerHTML = `<button type="button" class="sel-btn" aria-haspopup="listbox" aria-expanded="${open}"><span>${esc(label())}</span>
-      <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.8 6 7.8l3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      <div class="sel-menu" role="listbox">${items.map(i => `<button type="button" data-v="${esc(i.value)}" class="${i.value === val ? 'on' : ''}">${esc(i.label)}</button>`).join('')}</div>`;
+    wrap.innerHTML = items.map(i => `<button type="button" data-v="${esc(i.value)}" class="${i.value === val ? 'on' : ''}">${esc(i.label)}</button>`).join('');
   };
   const api = {
     get value(){ return val; },
@@ -36,18 +32,13 @@ function selDropdown(wrap, items, {value, onChange, title = ''} = {}){
       val = v; render();
       if (!silent) onChange?.(val);
     },
-    setOptions(next){ items = next; if (!items.some(i => i.value === val)){ val = items[0]?.value ?? ''; } render(); },
+    setOptions(next){ items = next; if (!items.some(i => i.value === val)) val = items[0]?.value ?? ''; render(); },
   };
-  wrap.addEventListener('click', e => {
-    const opt = e.target.closest('[data-v]');
-    if (opt){ api.set(opt.dataset.v); wrap.classList.remove('open'); render(); return; }
-    if (e.target.closest('.sel-btn')){ wrap.classList.toggle('open'); render(); }
-  });
-  document.addEventListener('click', e => { if (!wrap.contains(e.target) && wrap.classList.contains('open')){ wrap.classList.remove('open'); render(); } });
+  wrap.addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) api.set(b.dataset.v); });
   render();
   return api;
 }
-const getTask = id => api('/api/tasks?id=' + encodeURIComponent(id));
+
 const fmtBytes = n => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
 const fmtTime = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN', {hour12: false}) : '--';
 // 终态分两种: 容器还在的 (成功=蓝 失败=红, 现场可查) 和容器已清理的 (只剩记录, 用已停止的灰色)
@@ -91,7 +82,7 @@ async function showList(){
   if (location.hash.slice(1)) return;
   const clusters = [...new Set([...entries.map(e => e.group), ...tasks.map(t => t.config.cluster)])].filter(c => c).sort();
   const items = [{value: '__all', label: '全部集群'}, ...clusters.map(c => ({value: c, label: c}))];
-  const sel = clusterFilter ??= selDropdown($('#clusterSel'), items, {
+  const sel = clusterFilter ??= segControl($('#clusterSel'), items, {
     title: '按集群（主机分组）筛选任务列表',
     onChange: v => { localStorage.setItem('gpumon.clusterFilter', v); showList(); },
   });
@@ -153,7 +144,7 @@ async function showForm(fromId){
     }).join('')}</div>`).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
   };
   const form = $('#taskForm');
-  const clusterDD = selDropdown($('#clusterDD'), [{value: '', label: '自动'},
+  const clusterDD = segControl($('#clusterDD'), [{value: '', label: '自动'},
     ...[...groups.keys()].filter(g => g).map(g => ({value: g, label: g}))],
     {value: cfg.cluster || '', title: '选某个分组后只能选该分组的主机',
      onChange: v => { form.elements.cluster.value = v; form.elements.cluster.dispatchEvent(new Event('change')); }});   // 隐藏 input 同步并触发过滤
