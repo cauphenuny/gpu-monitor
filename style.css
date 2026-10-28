@@ -337,6 +337,8 @@ h2.rename:hover{border-bottom-color:var(--faint)}
 .log-h .seg[hidden]{display:none}
 .log-filter{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
 .log-filter .inp{width:150px}
+.log-filter .inp.bad{border-color:var(--hot);box-shadow:0 0 0 3px rgba(248,113,113,.12)}
+.seg.mini button{padding:3px 8px;font-size:11.5px}
 .sec-t{font-size:13px;font-weight:700;color:#d8e1ee;white-space:nowrap}
 .rpath{display:flex;gap:6px;flex:1;max-width:560px}
 .inp{flex:1;min-width:0;background:#101519;border:1px solid var(--line);color:var(--text);border-radius:var(--r-ctl);padding:6px 10px;

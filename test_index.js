@@ -27,26 +27,27 @@ assert(!fallback.includes('class="pcontainer"'));
 assert(!context.renderProc({container: '<img src=x>', name: '<script>'}).includes('<img src=x>'));
 console.log('页面时长格式、名称显示、回退和日志过滤检查通过');
 
-async function testLogFilter(){   // 日志过滤: 多词 AND、大小写不敏感; 半行留到写完; 改词后整体重画
-  for (const [line, q, want] of [['ERROR bad thing', 'error', true], ['ERROR bad thing', 'error warn', false],
-      ['plain line', 'PLAIN', true], ['a b c', 'b a', true], ['x', '', true]])
-    assert.strictEqual(context.matchFilter(line, context.parseFilter(q)), want);
+async function testLogFilter(){   // 日志过滤: 文本整段(可含空格)/正则两种模式; 半行留到写完; 改词后整体重画
   const pre = {textContent: '', insertAdjacentHTML(_, html){ this.textContent += html; },
                scrollHeight: 0, scrollTop: 0, clientHeight: 0};
-  let onInput;
-  const input = {addEventListener(_, fn){ onInput = fn; }, value: ''};
+  let onInput, onClick;
+  const input = {addEventListener(_, fn){ onInput = fn; }, value: '', classList: {toggle(_, on){ this.bad = on === true || on; }, bad: false}};
   const cnt = {textContent: ''};
-  const lf = context.lineFilter(pre, input, cnt, 1e9);
-  lf.emit('ERROR one\nINFO two\n');
-  assert(pre.textContent.includes('one') && pre.textContent.includes('two'));   // 无过滤词全显示
-  input.value = 'error';
-  onInput();
-  await new Promise(r => setTimeout(r, 400));                                   // 等防抖
-  assert(pre.textContent.includes('ERROR one') && !pre.textContent.includes('INFO two'));
-  assert.strictEqual(cnt.textContent, '1/2 行');
-  lf.emit('ERROR a\nINFO b\nERROR c\nno newline yet');
-  assert(pre.textContent.includes('ERROR a') && !pre.textContent.includes('INFO b') && pre.textContent.includes('ERROR c'));
-  assert(!pre.textContent.includes('newline yet'));                             // 半行不显示
+  const seg = {addEventListener(_, fn){ onClick = fn; }, querySelectorAll: () => []};
+  const lf = context.lineFilter(pre, input, cnt, seg, 1e9);
+  lf.emit('ERROR alpha down now\nINFO alpha is up\nWARN nothing\n');
+  assert(pre.textContent.includes('alpha down') && pre.textContent.includes('is up'));   // 无过滤词全显示
+  const setFilter = async q => { input.value = q; onInput(); await new Promise(r => setTimeout(r, 400)); };
+  await setFilter('alpha down');            // 文本模式: 整段匹配, 能带空格
+  assert(pre.textContent.includes('alpha down now') && !pre.textContent.includes('is up') && !pre.textContent.includes('nothing'));
+  assert.strictEqual(cnt.textContent, '1/3 行');
+  await setFilter('ALPHA DOWN');            // 文本模式忽略大小写
+  assert(pre.textContent.includes('alpha down now'));
+  seg._mode = 'regex'; onClick({target: {closest: sel => sel === '[data-m]' ? {dataset: {m: 'regex'}} : null}});
+  await setFilter('down|nothing');          // 正则模式
+  assert(pre.textContent.includes('alpha down now') && pre.textContent.includes('nothing') && !pre.textContent.includes('is up'));
+  await setFilter('[bad');                  // 非法正则: 标红, 无匹配
+  assert(input.classList.bad && pre.textContent === '');
   console.log('日志过滤检查通过');
 }
 testLogFilter().catch(error => { console.error(error); process.exitCode = 1; });

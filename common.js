@@ -43,21 +43,21 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
     else dlg.querySelector('[data-yes]').focus();
   });
 }
-// 日志过滤: 空格分隔多个词, 全部命中 (大小写不敏感) 的行才算匹配
-function parseFilter(q){
-  return q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-}
-function matchFilter(line, terms){
-  return !terms.length || terms.every(t => line.toLowerCase().includes(t));
-}
-
-// 每个日志框一套: 输入框防抖改词后整体重画, 平时 emit() 只进匹配的新行; 缓冲约 2MB, 更早的丢弃
-function lineFilter(pre, input, cnt, cap = 2e6){
-  let filter = '', shown = '', buf = '', total = 0, matched = 0, t;
-  const counts = () => cnt.textContent = filter.trim() && total ? `${matched}/${total} 行` : '';
-  const draw = lines => {
-    pre.insertAdjacentHTML('beforeend', ansiHTML(lines.join('\n') + '\n'));
+// 每个日志框一套过滤: seg 选 文本(整段子串, 可含空格, 忽略大小写) 或 正则(JS RegExp, 大小写敏感);
+// 正则非法时输入框标红且不匹配任何行. 改词防抖后整体重画, 平时 emit() 只进匹配的新行; 缓冲约 2MB
+function lineFilter(pre, input, cnt, seg, cap = 2e6){
+  let filter = '', mode = 'text', re = null, shown = '', buf = '', total = 0, matched = 0, t;
+  const counts = () => cnt.textContent = filter && total ? `${matched}/${total} 行` : '';
+  const compile = () => {
+    re = null;
+    input.classList.toggle('bad', false);
+    if (mode === 'regex' && filter){
+      try{ re = new RegExp(filter); }
+      catch{ input.classList.toggle('bad', true); }
+    }
   };
+  const hit = l => !filter || (mode === 'regex' ? re && re.test(l) : l.toLowerCase().includes(filter.toLowerCase()));
+  const draw = lines => pre.insertAdjacentHTML('beforeend', ansiHTML(lines.join('\n') + '\n'));
   const emit = text => {
     const stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
     buf += text;
@@ -66,8 +66,7 @@ function lineFilter(pre, input, cnt, cap = 2e6){
     shown += lines.map(l => l + '\n').join('');
     if (shown.length > cap) shown = shown.slice(-cap);
     total += lines.length;
-    const terms = parseFilter(filter);
-    const visible = lines.filter(l => matchFilter(l, terms));
+    const visible = lines.filter(hit);
     matched += visible.length;
     if (visible.length) draw(visible);
     if (stick) pre.scrollTop = pre.scrollHeight;
@@ -76,8 +75,7 @@ function lineFilter(pre, input, cnt, cap = 2e6){
   const renderAll = () => {
     const lines = shown.split('\n'); lines.pop();
     total = lines.length;
-    const terms = parseFilter(filter);
-    const visible = lines.filter(l => matchFilter(l, terms));
+    const visible = lines.filter(hit);
     matched = visible.length;
     pre.textContent = '';
     if (visible.length) draw(visible);
@@ -85,7 +83,16 @@ function lineFilter(pre, input, cnt, cap = 2e6){
   };
   input.addEventListener('input', () => {
     clearTimeout(t);
-    t = setTimeout(() => { filter = input.value; renderAll(); }, 250);
+    t = setTimeout(() => { filter = input.value; compile(); renderAll(); }, 250);
+  });
+  seg.addEventListener('click', e => {
+    const m = e.target.closest('[data-m]')?.dataset.m;
+    if (!m || m === mode) return;
+    mode = m;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.target.closest('[data-m]')));
+    input.placeholder = m === 'regex' ? '过滤，正则' : '过滤，文本可含空格';
+    compile();
+    renderAll();
   });
   return {emit, reset(){ shown = ''; buf = ''; total = matched = 0; pre.textContent = ''; counts(); }};
 }
