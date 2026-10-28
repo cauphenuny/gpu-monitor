@@ -138,17 +138,23 @@ async function showForm(fromId){
   const drawPick = () => {
     const c = clusterSel();
     $('#pickCnt').textContent = `已选 ${picked.length} / 需 ${$('#taskForm').elements.nodes.value || '?'}`;
-    $('#hostPick').innerHTML = [...groups].map(([g, hs]) => `<div class="pick-g"><span class="pick-gn">${esc(g || '未分组')}</span>${hs.filter(h => !c || groupsOf(h).has(c)).map(h => {
+    $('#hostPick').innerHTML = [...groups].map(([g, hs]) => {
+      const vis = hs.filter(h => !c || groupsOf(h).has(c));
+      if (!vis.length) return '';   // 该集群没有可选主机时整行不渲染, 不留孤零零的分组名
+      return `<div class="pick-g"><span class="pick-gn">${esc(g || '未分组')}</span>${vis.map(h => {
       const i = picked.indexOf(h);
       return `<button type="button" class="chip${i >= 0 ? ' on' : ''}${i === 0 ? ' head' : ''}" data-h="${esc(h)}" aria-pressed="${i >= 0}"${disabled[h] ? ` title="已禁用：${esc(disabled[h])}"` : ''}>
         ${i >= 0 ? `<b>${i + 1}</b>` : ''}${esc(h)}${i === 0 ? '<span class="badge ok">head</span>' : ''}${loadHTML(load.get(h))}${disabled[h] ? '<span class="badge hot">禁用</span>' : ''}</button>`;
-    }).join('')}</div>`).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
+      }).join('')}</div>`;
+    }).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
   };
   const form = $('#taskForm');
+  const listCluster = clusterFilter?.value;   // 列表筛选的集群作为新建默认值; 复制任务时用原任务自己的
   const clusterDD = segControl($('#clusterDD'), [{value: '', label: '自动'},
     ...[...groups.keys()].filter(g => g).map(g => ({value: g, label: g}))],
-    {value: cfg.cluster || '', title: '选某个分组后只能选该分组的主机',
+    {value: cfg.cluster || (listCluster && listCluster !== '__all' ? listCluster : ''), title: '选某个分组后只能选该分组的主机',
      onChange: v => { form.elements.cluster.value = v; form.elements.cluster.dispatchEvent(new Event('change')); }});   // 隐藏 input 同步并触发过滤
+  form.elements.cluster.value = clusterDD.value;   // 初始默认值 (列表联动/复制) 也要写进隐藏 input 并过滤
   drawPick();
   form.elements.nodes.addEventListener('input', drawPick);
   form.elements.cluster.addEventListener('change', () => {   // 换集群 (下拉或自动锁定触发): 留下还属于它的已选主机
