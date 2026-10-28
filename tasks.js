@@ -2,8 +2,8 @@ const STATUS = {launching: ['启动中', 'warn'], running: ['运行中', 'ok'], 
   failed: ['失败', 'hot'], stopped: ['已停止', 'muted']};
 const ACTIVE = ['launching', 'running'];
 const LOG_HEAD = 1024 * 1024;   // 默认只看日志开头这么多字节, 超出的点「跳到末尾」再看
-const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'];   // 导入/导出剪贴板的字段, 不含主机
-const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], env: '', mounts: '', entrypoint: '', proxy: '',
+const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'];   // 导入/导出剪贴板的字段, 不含主机
+const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', mounts: '', entrypoint: '', proxy: '',
   docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864'};
 let pollTimer = null;
 
@@ -87,7 +87,8 @@ async function showForm(fromId){
     ${field('名称', '', `<input name="name" required maxlength="100" value="${esc(src?.name || '')}">`)}
     ${field('备注', '', `<textarea name="note" rows="2">${esc(src?.note || '')}</textarea>`)}
     ${field('镜像', '', `<input name="image" required class="mono" spellcheck="false" value="${esc(cfg.image)}">`)}
-    <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为 head，entrypoint 在 head 上执行</small></span><div id="hostPick"></div></div>
+    ${field('节点数量', '', `<input name="nodes" type="number" min="1" max="64" required value="${src?.config.nodes || src?.config.hosts?.length || cfg.nodes}">`)}
+    <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为 head，entrypoint 在 head 上执行 · <b id="pickCnt"></b></small></span><div id="hostPick"></div></div>
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
     ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', area('env', 8))}
     ${field('挂载', '每行 src[:dst[:ro]]，dst 省略时同 src；src 须在每台主机上存在', area('mounts', 4))}
@@ -97,6 +98,7 @@ async function showForm(fromId){
     <div class="form-a"><a class="btn ghost" href="#">取消</a><button class="primary" type="submit">提交</button></div>
   </form>`;
   const drawPick = () => {
+    $('#pickCnt').textContent = `已选 ${picked.length} / 需 ${$('#taskForm').elements.nodes.value || '?'}`;
     $('#hostPick').innerHTML = [...groups].map(([g, hs]) => `<div class="pick-g"><span class="pick-gn">${esc(g || '未分组')}</span>${hs.map(h => {
       const i = picked.indexOf(h);
       return `<button type="button" class="chip${i >= 0 ? ' on' : ''}${i === 0 ? ' head' : ''}" data-h="${esc(h)}" aria-pressed="${i >= 0}"${disabled[h] ? ` title="已禁用：${esc(disabled[h])}"` : ''}>
@@ -104,6 +106,7 @@ async function showForm(fromId){
     }).join('')}</div>`).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
   };
   drawPick();
+  $('#taskForm').elements.nodes.addEventListener('input', drawPick);
   api('/api/status').then(d => {
     load = new Map(d.results.map(r => [r.host, r]));
     if ($('#hostPick')) drawPick();
@@ -136,10 +139,13 @@ async function showForm(fromId){
   $('#taskForm').addEventListener('submit', async e => {
     e.preventDefault();
     const f = new FormData(e.target), btn = e.target.querySelector('[type=submit]');
+    const nodes = parseInt(f.get('nodes'), 10);
+    if (!Number.isInteger(nodes) || nodes < 1) return notify('节点数量需为正整数');
+    if (picked.length !== nodes) return notify(`需选择 ${nodes} 台主机，当前 ${picked.length} 台`);
     if (!picked.length) return notify('请至少选择一台主机');
     btn.disabled = true;
     try{
-      const config = Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'].map(k => [k, f.get(k)]));
+      const config = {nodes, ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'].map(k => [k, f.get(k)]))};
       const t = await post('/api/tasks', {name: f.get('name'), note: f.get('note'), config: {...config, hosts: picked}});
       location.hash = t.id;
     }catch(err){
@@ -183,6 +189,7 @@ function taskHead(t, cfgOpen){
     ${t.error ? `<div class="ban">${esc(t.error)}</div>` : ''}
     <div class="kv panel">
       <div><span>任务 ID</span><b>${t.id}</b></div>
+      <div><span>节点数量</span><b>${t.config.nodes ?? t.config.hosts.length}</b></div>
       <div class="wide"><span>容器名</span><b>${esc(t.container)}${t.containers_up ? '' : ' <small>(已清理)</small>'}</b></div>
       <div class="wide"><span>镜像</span><b>${esc(t.config.image)}</b></div>
       <div><span>创建</span><b>${fmtTime(t.created)}</b></div><div><span>entrypoint 启动</span><b>${fmtTime(t.started)}</b></div>

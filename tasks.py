@@ -165,6 +165,17 @@ def validate(cfg, known_hosts):
     if unknown:
         raise TaskError("主机未配置: " + ", ".join(unknown))
     out["hosts"] = hosts
+    # 节点数量: 必须与所选主机数一致才允许提交 (平台「工作节点数量」的对应物)
+    nodes = cfg.get("nodes", len(hosts))
+    try:
+        nodes = int(nodes)
+    except (TypeError, ValueError):
+        raise TaskError("节点数量需为正整数")
+    if not 1 <= nodes <= 64:
+        raise TaskError("节点数量需在 1~64 之间")
+    if nodes != len(hosts):
+        raise TaskError(f"节点数量为 {nodes}，请恰好选择 {nodes} 台主机（当前 {len(hosts)} 台）")
+    out["nodes"] = nodes
     parse_env(out["env"])
     parse_mounts(out["mounts"])
     try:

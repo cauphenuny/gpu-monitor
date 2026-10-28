@@ -40,6 +40,7 @@ curl -s "$MON/api/tasks?id=<任务ID>"            # 单个任务: 状态、节�
 |---|---|
 | image | 镜像，必填 |
 | hosts | 主机数组，**顺序即 /root/mpi_hostfile 顺序，第 1 台是 head**，entrypoint 只在 head 上跑 |
+| nodes | 节点数量（1~64），必须与 hosts 数量一致，否则拒绝创建 |
 | ifname | 互连网卡名，默认 `bond0`；预检会读它的 IPv4，读不到直接失败 |
 | env | 每行 `[export ]KEY=VALUE`，`#` 注释；不做 shell 展开 |
 | mounts | 每行 `src[:dst[:ro]]` 绝对路径；src 必须在每台主机存在；dst 不能覆盖 `/root/.ssh` 等 |
@@ -51,7 +52,7 @@ curl -s "$MON/api/tasks?id=<任务ID>"            # 单个任务: 状态、节�
 curl -s -X POST $MON/api/tasks -H "Content-Type: application/json" -H "X-GPUMon-Token: $TOKEN" -d '{
   "name": "pd-test", "note": "desc",
   "config": {"image": "zcr.zhipuai-infra.cn/infra/sglang:v0.5.10-xxx",
-    "hosts": ["zp-h200-003", "zp-h200-004"], "ifname": "bond0",
+    "hosts": ["zp-h200-003", "zp-h200-004"], "nodes": 2, "ifname": "bond0",
     "env": "PREFILL_REPLICAS=1\nDECODE_REPLICAS=1",
     "mounts": "/mnt/ceph/workspace/ycp/code/looplm",
     "entrypoint": "bash /mnt/ceph/workspace/ycp/code/looplm/utils/launch/platform-b300-pd.sh",
@@ -80,6 +81,7 @@ curl -s "$MON/api/tasks/tail?id=<ID>&path=/logs/prefill_g0.log&offset=-1"   # �
 ```bash
 curl -s -X POST $MON/api/tasks/stop   -H ..token.. -d '{"id":"<ID>"}'   # 所有主机 docker rm -f
 curl -s -X POST $MON/api/tasks/rename -H ..token.. -d '{"id":"<ID>","name":"新名字"}'
+curl -s -X POST $MON/api/tasks/note   -H ..token.. -d '{"id":"<ID>","note":"备注"}'   # 空串清除
 curl -s -X DELETE "$MON/api/tasks?id=<ID>" -H "X-GPUMon-Token: $TOKEN"  # 须先停止
 ```
 
@@ -90,3 +92,4 @@ curl -s -X DELETE "$MON/api/tasks?id=<ID>" -H "X-GPUMon-Token: $TOKEN"  # 须先
 - 清空某台主机的 GPU 占用（占卡进程在容器里时 `docker stop -t 0` 整个容器）：
   `POST /api/hosts/clear {"host": "x", "confirmation": "x"}`（confirmation 必须逐字等于 host）。
 - 改容器名前缀（默认 gpumon）：`POST /api/settings {"docker_prefix": "ycp"}`。
+- 更新服务本身（git pull 后自重启，令牌随之轮换）：`POST /api/update`；已是最新时不动。

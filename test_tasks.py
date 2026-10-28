@@ -31,7 +31,13 @@ class ParseTest(unittest.TestCase):
                 tasks.parse_mounts(bad)
 
     def test_validate(self):
-        self.assertEqual(tasks.validate(CFG, {"h1", "h2"})["hosts"], ["h1", "h2"])
+        out = tasks.validate(CFG, {"h1", "h2"})
+        self.assertEqual(out["hosts"], ["h1", "h2"])
+        self.assertEqual(out["nodes"], 2)   # 缺省取所选主机数
+        self.assertEqual(tasks.validate({**CFG, "nodes": "2"}, {"h1", "h2"})["nodes"], 2)
+        for patch_, msg in (({"nodes": 3}, "恰好选择 3 台"), ({"nodes": 0}, "1~64"), ({"nodes": "x"}, "正整数")):
+            with self.subTest(msg=msg), self.assertRaisesRegex(tasks.TaskError, msg):
+                tasks.validate({**CFG, **patch_}, {"h1", "h2"})
         for patch_, msg in (({"hosts": ["h1", "h1"]}, "重复"), ({"hosts": ["h3"]}, "未配置"),
                             ({"hosts": []}, "主机"), ({"image": "a b"}, "镜像"),
                             ({"ifname": "bond0;rm"}, "网卡"), ({"docker_args": "'"}, "docker")):

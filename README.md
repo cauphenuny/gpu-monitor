@@ -27,6 +27,7 @@ python3 server.py            # 默认监听 http://127.0.0.1:8799
   - **新建/复制**：右上角「新建任务」；列表或详情页的「复制」用已有任务的名称、备注和配置预填表单。字段：
     - 名称（必填，不超过 100 字）、备注
     - 镜像
+    - 节点数量：需与所选主机数一致才能提交，主机栏实时显示「已选 N / 需 M」
     - 主机：从监控页已添加的主机里按分组点选，**点选顺序即 hostfile 顺序**，第 1 台为 head；已禁用的主机会标出，但仍可选
     - 网卡：默认 `bond0`，取该网卡的 IPv4 作为容器互连和 hostfile 地址
     - 环境变量：每行 `[export ]KEY=VALUE`，`#` 开头为注释；VALUE 外层成对的引号会去掉，不做 shell 展开
@@ -120,7 +121,7 @@ python3 server.py query H200 --brief   # 精简输出, HTTP 等价于 /api/statu
 
 - `GET /api/tasks` — 任务列表 `{"tasks":[..]}`，按创建时间倒序；`GET /api/tasks?id=..` 单个任务，不存在返回 404。`status` 为 `launching`/`running`/`succeeded`/`failed`/`stopped`，`nodes` 为各节点的 `host`/`ip`/`gpus`/`state`
 - `GET /api/tasks/log?id=..&which=output|launch&offset=..` — 从 `offset` 字节起读 entrypoint 输出（`output`）或启动日志（`launch`），每次最多 256KB、按整行切；`offset<0`（省略时默认 -1）表示只读最后 1MB。返回 `text`、下次请求用的 `offset`，以及 `more`（是否还有未读内容）
-- `POST /api/tasks` `{"name":..,"note":..,"config":{"image","ifname","hosts":[..],"env","mounts","entrypoint","docker_args"}}` — 校验后立即返回新任务，后台拉起；`hosts` 须为已配置的主机，顺序即 hostfile 顺序
+- `POST /api/tasks` `{"name":..,"note":..,"config":{"image","ifname","nodes","hosts":[..],"env","mounts","entrypoint","docker_args","proxy"}}` — 校验后立即返回新任务，后台拉起；`hosts` 须为已配置的主机、数量等于 `nodes`，顺序即 hostfile 顺序
 - `GET /api/tasks/files?id=..&path=..` — 列出 head 容器内该目录下的文件（最多 3 层、200 个；path 为文件时只返回它自己），返回 `files: [{name, size, mtime}]`
 - `GET /api/tasks/tail?id=..&path=..&offset=..` — 增量读 head 容器内的文件，用法同 `/api/tasks/log`；`offset<0` 读最后 64KB；文件被截断或轮转时返回 `reset: true` 并从头读
 - `POST /api/update` — 任务页「更新」按钮：在服务目录执行 `git pull --ff-only`，拉到新代码后服务用 `execv` 重新执行自己（同样的端口/参数），失败时返回 git 输出且不重启
