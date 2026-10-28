@@ -8,6 +8,8 @@ const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', moun
 let pollTimer = null;
 let clusterFilter = null;   // 顶栏集群筛选下拉, 跨轮询复用
 const seenTasks = new Set();   // 首次出现的任务行才播入场动画, 轮询重绘不动 (同监控页 seenCards)
+let reanimList = false;   // 从详情/表单返回列表时整体重播一次
+let lastRoute = '';
 const animIn = (el, i) => { el.classList.add('in'); el.style.setProperty('--i', Math.min(i, 12)); };
 
 async function api(url, opts = {}){
@@ -71,6 +73,8 @@ document.addEventListener('keydown', e => {
 async function route(){
   clearTimeout(pollTimer);
   const h = decodeURIComponent(location.hash.slice(1));
+  if (!h && lastRoute) reanimList = true;   // 返回列表: 行重新入场一次
+  lastRoute = h;
   try{
     if (!h) await showList();
     else if (h === 'new' || h.startsWith('new/')) await showForm(h.slice(4));
@@ -95,13 +99,14 @@ async function showList(){
   const shown = sel.value === '__all' ? tasks : tasks.filter(t => t.config.cluster === sel.value);
   const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
   $('#view').innerHTML = shown.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
-    <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${shown.map((t, i) => `<tr${seenTasks.has(t.id) ? '' : ` class="in" style="--i:${Math.min(i, 12)}"`}>
+    <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${shown.map((t, i) => `<tr${seenTasks.has(t.id) && !reanimList ? '' : ` class="in" style="--i:${Math.min(i, 12)}"`}>
       <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.creator ? ' · ' + esc(t.creator) : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
       <td>${badge(t)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
     : `<div class="hint">还没有任务${sel.value === '__all' ? '' : `（集群 ${esc(sel.value)}）`}，点右上角「新建任务」</div>`;
   shown.forEach(t => seenTasks.add(t.id));
+  reanimList = false;
   window.scrollTo(0, y);
   if (tasks.some(t => ACTIVE.includes(t.status))) pollTimer = setTimeout(route, 5000);
 }
@@ -305,7 +310,10 @@ async function showTask(id){
       const first = drawn === '';
       head.innerHTML = drawn = html;
       if (fs) $('#epWrap')?.classList.add('fs');   // 重建时保住 entrypoint 的全屏状态
-      if (first) [...head.children].forEach(animIn);   // 只有第一次进详情播入场, 之后内容变化不重播
+      if (first){
+        [...head.children].forEach(animIn);   // 只有第一次进详情播入场, 之后内容变化不重播
+        document.querySelectorAll('#view > .logbox').forEach((el, i) => animIn(el, head.children.length + i));   // 日志面板接着入场
+      }
     }
     $('#runFor').textContent = runFor(t);
     document.querySelectorAll('#logSeg button').forEach(b => b.classList.toggle('on', b.dataset.w === which));
@@ -451,12 +459,14 @@ function remoteLog(id, task){
     const f = e.target.closest('[data-f]')?.dataset.f;
     if (f != null) open(join(form.p.value.trim(), f));
   });
-  const sync = () => {   // 容器清理后面板不可用
+  const sync = () => {   // 容器清理后面板不可用; 已切走别的页面就停 (元素不在了)
+    const box = $('#rbox');
+    if (!box || location.hash.slice(1) !== id) return;
     const up = task().containers_up;
-    $('#rbox').classList.toggle('off', !up);
+    box.classList.toggle('off', !up);
     form.querySelectorAll('input,button').forEach(x => x.disabled = !up);
     if (!up && !info.textContent) info.textContent = '容器已清理，无法查看';
-    if (location.hash.slice(1) === id) setTimeout(sync, 2000);
+    setTimeout(sync, 2000);
   };
   sync();
   if (task().containers_up) form.requestSubmit();
