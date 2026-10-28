@@ -7,6 +7,8 @@ const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', moun
   docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864'};
 let pollTimer = null;
 let clusterFilter = null;   // 顶栏集群筛选下拉, 跨轮询复用
+const seenTasks = new Set();   // 首次出现的任务行才播入场动画, 轮询重绘不动 (同监控页 seenCards)
+const animIn = (el, i) => { el.classList.add('in'); el.style.setProperty('--i', Math.min(i, 12)); };
 
 async function api(url, opts = {}){
   const r = await fetch(url, {...opts, headers: {'Content-Type': 'application/json', 'X-GPUMon-Token': clearToken}});
@@ -93,12 +95,13 @@ async function showList(){
   const shown = sel.value === '__all' ? tasks : tasks.filter(t => t.config.cluster === sel.value);
   const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
   $('#view').innerHTML = shown.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
-    <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${shown.map(t => `<tr>
+    <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${shown.map((t, i) => `<tr${seenTasks.has(t.id) ? '' : ` class="in" style="--i:${Math.min(i, 12)}"`}>
       <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.creator ? ' · ' + esc(t.creator) : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
       <td>${badge(t)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
     : `<div class="hint">还没有任务${sel.value === '__all' ? '' : `（集群 ${esc(sel.value)}）`}，点右上角「新建任务」</div>`;
+  shown.forEach(t => seenTasks.add(t.id));
   window.scrollTo(0, y);
   if (tasks.some(t => ACTIVE.includes(t.status))) pollTimer = setTimeout(route, 5000);
 }
@@ -155,6 +158,7 @@ async function showForm(fromId){
     {value: cfg.cluster || (listCluster && listCluster !== '__all' ? listCluster : ''), title: '选某个分组后只能选该分组的主机',
      onChange: v => { form.elements.cluster.value = v; form.elements.cluster.dispatchEvent(new Event('change')); }});   // 隐藏 input 同步并触发过滤
   form.elements.cluster.value = clusterDD.value;   // 初始默认值 (列表联动/复制) 也要写进隐藏 input 并过滤
+  [...form.children].forEach(animIn);   // 字段依次入场, 只在建表单时播一次
   drawPick();
   form.elements.nodes.addEventListener('input', drawPick);
   form.elements.cluster.addEventListener('change', () => {   // 换集群 (下拉或自动锁定触发): 留下还属于它的已选主机
@@ -298,8 +302,10 @@ async function showTask(id){
     const html = taskHead(t, $('#cfg')?.open);
     if (html !== drawn){   // 内容没变不重建, 免得按钮在点击途中被换掉
       const fs = !!$('#epWrap.fs');
+      const first = drawn === '';
       head.innerHTML = drawn = html;
       if (fs) $('#epWrap')?.classList.add('fs');   // 重建时保住 entrypoint 的全屏状态
+      if (first) [...head.children].forEach(animIn);   // 只有第一次进详情播入场, 之后内容变化不重播
     }
     $('#runFor').textContent = runFor(t);
     document.querySelectorAll('#logSeg button').forEach(b => b.classList.toggle('on', b.dataset.w === which));
@@ -435,7 +441,7 @@ function remoteLog(id, task){
       const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}`);
       if (r.files.length === 1 && !r.files[0].name) return open(dir);   // 输入的就是文件
       info.textContent = r.files.length ? `${r.files.length} 个文件` : '目录下没有文件';
-      list.innerHTML = r.files.map(f => `<button type="button" class="chip" data-f="${esc(f.name)}" title="${fmtTime(f.mtime)} 修改">
+      list.innerHTML = r.files.map((f, i) => `<button type="button" class="chip in" data-f="${esc(f.name)}" style="--i:${Math.min(i, 12)}" title="${fmtTime(f.mtime)} 修改">
         ${esc(f.name)}<small>${fmtBytes(f.size)}</small></button>`).join('');
     }catch(err){
       info.textContent = err.message;

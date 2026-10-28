@@ -369,6 +369,8 @@ h2.rename:hover{border-bottom-color:var(--faint)}
 details#cfg .fs-wrap.fs>pre{max-height:none}
 .fs-wrap.fs .fs-btn{top:22px;right:22px}
 
+/* 任务页入场动画: 复用监控页的 rise, 只在首次出现时播 (JS 加 .in), 尊重 prefers-reduced-motion */
+.tasks .in{animation:rise .45s cubic-bezier(.22,.9,.3,1) both;animation-delay:calc(var(--i, 0) * 40ms)}
 /* 日志头部所有控件同高: 输入框/按钮/分段选择一律 30px 外框 */
 .log-h .inp,.log-h .btn,.log-h .seg{height:30px;box-sizing:border-box}
 .log-h .inp,.log-h .btn{padding:0 10px}
