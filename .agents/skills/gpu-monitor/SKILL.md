@@ -75,6 +75,7 @@ curl -s "$MON/api/tasks/tail?id=<ID>&path=/logs/prefill_g0.log&offset=-1"   # �
 
 `offset=-1` 读最后一小段；把返回的 `offset` 带回下次请求即增量轮询。
 任务状态机：`launching → running → succeeded/failed/stopped`。
+判断机器是否还被占用看 `containers_up`（不是 status）：true 表示容器还在（可进容器查现场），false 表示已清理或从未创建。
 
 ## 写：停止 / 删除 / 改名
 

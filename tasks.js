@@ -17,10 +17,10 @@ const post = (url, body) => api(url, {method: 'POST', body: JSON.stringify(body)
 const getTask = id => api('/api/tasks?id=' + encodeURIComponent(id));
 const fmtBytes = n => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
 const fmtTime = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN', {hour12: false}) : '--';
-// 失败分两种: 容器还在的 (现场可查, 红色) 和容器已清理的 (只剩记录, 用已停止的灰色)
+// 终态分两种: 容器还在的 (成功=蓝 失败=红, 现场可查) 和容器已清理的 (只剩记录, 用已停止的灰色)
 const badge = t => {
   const s = typeof t === 'string' ? t : t.status;
-  const cls = s === 'failed' && t?.containers_up === false ? '' : STATUS[s]?.[1] || '';
+  const cls = (s === 'failed' || s === 'succeeded') && t?.containers_up === false ? '' : STATUS[s]?.[1] || '';
   return `<span class="badge ${cls}">${STATUS[s]?.[0] || esc(s)}</span>`;
 };
 const runFor = t => t.started ? fmtDuration((t.ended || Date.now() / 1000) - t.started) : '--';
