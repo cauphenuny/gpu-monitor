@@ -6,6 +6,7 @@ const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 
 const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', mounts: '', entrypoint: '', proxy: '',
   docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864'};
 let pollTimer = null;
+let clusterFilter = null;   // 顶栏集群筛选下拉, 跨轮询复用
 
 async function api(url, opts = {}){
   const r = await fetch(url, {...opts, headers: {'Content-Type': 'application/json', 'X-GPUMon-Token': clearToken}});
@@ -14,6 +15,38 @@ async function api(url, opts = {}){
   return d;
 }
 const post = (url, body) => api(url, {method: 'POST', body: JSON.stringify(body)});
+
+// 复用监控页 .sel 风格的下拉: wrap 会被填成 sel-btn + sel-menu; silent 置位时不触发 onChange
+function selDropdown(wrap, items, {value, onChange, title = ''} = {}){
+  let val = value ?? items[0]?.value ?? '';
+  const label = () => items.find(i => i.value === val)?.label ?? '';
+  const render = () => {
+    const open = wrap.classList.contains('open');
+    wrap.classList.add('sel');
+    wrap.title = title;
+    wrap.innerHTML = `<button type="button" class="sel-btn" aria-haspopup="listbox" aria-expanded="${open}"><span>${esc(label())}</span>
+      <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.8 6 7.8l3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="sel-menu" role="listbox">${items.map(i => `<button type="button" data-v="${esc(i.value)}" class="${i.value === val ? 'on' : ''}">${esc(i.label)}</button>`).join('')}</div>`;
+  };
+  const api = {
+    get value(){ return val; },
+    set value(v){ api.set(v); },
+    set(v, silent = false){
+      if (v === val) return;
+      val = v; render();
+      if (!silent) onChange?.(val);
+    },
+    setOptions(next){ items = next; if (!items.some(i => i.value === val)){ val = items[0]?.value ?? ''; } render(); },
+  };
+  wrap.addEventListener('click', e => {
+    const opt = e.target.closest('[data-v]');
+    if (opt){ api.set(opt.dataset.v); wrap.classList.remove('open'); render(); return; }
+    if (e.target.closest('.sel-btn')){ wrap.classList.toggle('open'); render(); }
+  });
+  document.addEventListener('click', e => { if (!wrap.contains(e.target) && wrap.classList.contains('open')){ wrap.classList.remove('open'); render(); } });
+  render();
+  return api;
+}
 const getTask = id => api('/api/tasks?id=' + encodeURIComponent(id));
 const fmtBytes = n => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
 const fmtTime = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN', {hour12: false}) : '--';
@@ -57,11 +90,14 @@ async function showList(){
   const [{tasks}, {hosts: entries}] = await Promise.all([api('/api/tasks'), api('/api/hosts')]);
   if (location.hash.slice(1)) return;
   const clusters = [...new Set([...entries.map(e => e.group), ...tasks.map(t => t.config.cluster)])].filter(c => c).sort();
-  const sel = $('#clusterSel');
+  const items = [{value: '__all', label: '全部集群'}, ...clusters.map(c => ({value: c, label: c}))];
+  const sel = clusterFilter ??= selDropdown($('#clusterSel'), items, {
+    title: '按集群（主机分组）筛选任务列表',
+    onChange: v => { localStorage.setItem('gpumon.clusterFilter', v); showList(); },
+  });
   const cur = localStorage.getItem('gpumon.clusterFilter') ?? '__all';
-  sel.innerHTML = '<option value="__all">全部集群</option>' + clusters.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  sel.value = clusters.includes(cur) || cur === '__all' ? cur : '__all';
-  sel.onchange = () => { localStorage.setItem('gpumon.clusterFilter', sel.value); showList(); };
+  sel.setOptions(items);
+  sel.set(items.some(i => i.value === cur) ? cur : '__all', true);   // 轮询刷新不重新触发筛选
   const shown = sel.value === '__all' ? tasks : tasks.filter(t => t.config.cluster === sel.value);
   const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
   $('#view').innerHTML = shown.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
@@ -96,7 +132,7 @@ async function showForm(fromId){
     ${field('名称', '', `<input name="name" required maxlength="100" value="${esc(src?.name || '')}">`)}
     ${field('备注', '', `<textarea name="note" rows="2">${esc(src?.note || '')}</textarea>`)}
     ${field('镜像', '', `<input name="image" required class="mono" spellcheck="false" value="${esc(cfg.image)}">`)}
-    ${field('集群', '选某个分组后只能选该分组的主机；「自动」时点第一台主机自动锁定其所在集群', `<select name="cluster" class="inp"><option value="">自动</option>${[...groups.keys()].filter(g => g).map(g => `<option value="${esc(g)}"${cfg.cluster === g ? ' selected' : ''}>${esc(g)}</option>`).join('')}</select>`)}
+    ${field('集群', '选某个分组后只能选该分组的主机；「自动」时点第一台主机自动锁定其所在集群', `<input type="hidden" name="cluster" value="${esc(cfg.cluster || '')}"><div id="clusterDD"></div>`)}
     ${field('节点数量', '', `<input name="nodes" type="number" min="1" max="64" required value="${src?.config.nodes || src?.config.hosts?.length || cfg.nodes}">`)}
     <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为 head，entrypoint 在 head 上执行 · <b id="pickCnt"></b></small></span><div id="hostPick"></div></div>
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
@@ -117,9 +153,13 @@ async function showForm(fromId){
     }).join('')}</div>`).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
   };
   const form = $('#taskForm');
+  const clusterDD = selDropdown($('#clusterDD'), [{value: '', label: '自动'},
+    ...[...groups.keys()].filter(g => g).map(g => ({value: g, label: g}))],
+    {value: cfg.cluster || '', title: '选某个分组后只能选该分组的主机',
+     onChange: v => { form.elements.cluster.value = v; form.elements.cluster.dispatchEvent(new Event('change')); }});   // 隐藏 input 同步并触发过滤
   drawPick();
   form.elements.nodes.addEventListener('input', drawPick);
-  form.elements.cluster.addEventListener('change', () => {   // 换集群: 留下还属于它的已选主机
+  form.elements.cluster.addEventListener('change', () => {   // 换集群 (下拉或自动锁定触发): 留下还属于它的已选主机
     const c = clusterSel();
     picked = picked.filter(h => !c || groupsOf(h).has(c));
     drawPick();
@@ -134,7 +174,7 @@ async function showForm(fromId){
     picked = picked.includes(h) ? picked.filter(x => x !== h) : [...picked, h];
     if (!clusterSel()){   // 自动模式: 点第一台主机时锁定它所在的集群
       const gs = [...groupsOf(h)];
-      if (gs.length === 1 && gs[0]) form.elements.cluster.value = gs[0];
+      if (gs.length === 1 && gs[0]) clusterDD.value = gs[0];
     }
     drawPick();
   });
