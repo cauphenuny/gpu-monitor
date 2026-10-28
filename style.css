@@ -366,3 +366,9 @@ h2.rename:hover{border-bottom-color:var(--faint)}
 .fs-wrap.fs>pre{height:auto;max-height:none}   /* 覆盖日志的 62vh 和配置里的 320px 上限 */
 details#cfg .fs-wrap.fs>pre{max-height:none}
 .fs-wrap.fs .fs-btn{top:22px;right:22px}
+
+/* 日志头部所有控件同高: 输入框/按钮/分段选择一律 30px 外框 */
+.log-h .inp,.log-h .btn,.log-h .seg{height:30px;box-sizing:border-box}
+.log-h .inp,.log-h .btn{padding:0 10px}
+.log-h .seg{padding:2px}
+.log-h .seg button{height:24px;padding:0 10px}
