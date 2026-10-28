@@ -75,7 +75,7 @@ curl -s "$MON/api/tasks/tail?id=<ID>&path=/logs/prefill_g0.log&offset=-1"   # �
 
 `offset=-1` 读最后一小段；把返回的 `offset` 带回下次请求即增量轮询。
 任务状态机：`launching → running → succeeded/failed/stopped`。
-判断机器是否还被占用看 `containers_up`（不是 status）：true 表示容器还在（可进容器查现场），false 表示已清理或从未创建。
+判断机器是否还被占用看 `containers_up`（不是 status）：true 表示容器还在（可进容器查现场），false 表示已清理或从未创建。巡检线程每分钟并行检查每个节点的容器，任一被删/退出约 1 分钟内任务自动标为 `failed`（红色，`containers_up` 不变——剩余容器仍占机器）；之后仍应点一次「停止」清理（对全主机幂等的 `docker rm -f`）。
 
 ## 写：停止 / 删除 / 改名
 

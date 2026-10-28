@@ -732,8 +732,52 @@ def delete(tid):
     shutil.rmtree(_dir(tid))
 
 
+def check_nodes(t):
+    """并行查每个节点的容器状态. 返回异常节点描述列表 ([] = 都正常或查不了)."""
+    hosts, name = t["config"]["hosts"], t["container"]
+
+    def probe(h):
+        try:
+            out = _ssh(h, _bash(f"docker inspect -f '{{{{.State.Running}}}}' {shlex.quote(name)} "
+                                f"2>/dev/null || echo gone"), timeout=30)
+        except TaskError:
+            return None   # ssh 不通 (网络/主机下线), 不当容器没了
+        s = out.strip()
+        if s == "gone":
+            return f"{h}: 容器已被删除"
+        return None if s == "true" else f"{h}: 容器已退出"
+
+    with ThreadPoolExecutor(len(hosts)) as ex:
+        return [r for r in ex.map(probe, hosts) if r]
+
+
+def monitor_once():
+    """巡检运行中的任务: 任一节点容器被删/退出即标红失败.
+    不动 containers_up —— 其余节点的容器可能还占着机器, 留给「停止」清理后才变灰."""
+    for t in list_tasks():
+        if t["status"] != "running":
+            continue
+        bad = check_nodes(t)
+        if bad:
+            reason = "; ".join(bad)
+            _log(t["id"], reason)
+            _finish(t["id"], "failed", reason)
+
+
+def _monitor():
+    while True:
+        time.sleep(60)
+        try:
+            monitor_once()
+        except Exception as e:   # 巡检自身出错不退出
+            with _lock:
+                with open(TASKS_DIR / "monitor.log", "a", encoding="utf-8") as f:
+                    f.write(time.strftime("%F %T 巡检异常: ") + str(e) + "\n")
+
+
 def recover():
-    """服务启动时调用: 拉起中断的标失败; 运行中的接回 entrypoint 输出."""
+    """服务启动时调用: 拉起中断的标失败; 运行中的接回 entrypoint 输出; 起容器巡检线程."""
+    _bg(_monitor)
     for t in list_tasks():
         if t.get("launch_active"):
             update(t["id"], launch_active=False)

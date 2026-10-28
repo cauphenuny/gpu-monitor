@@ -108,7 +108,11 @@ python3 server.py query H200 --brief   # 精简输出, HTTP 等价于 /api/statu
 
 每台主机结果带 `disabled`：`null` 表示可用，被临时禁用时为原因字符串（未填为 `"未注明原因"`），agent 挑机器时应跳过非 `null` 的主机。
 
-每台主机结果带 `stale` 和 `data_age_seconds`：本次查询失败时（`ok: false`，`error` 为原因），若服务进程里有该主机上一次成功的数据，则 `gpus` 返回那份数据，`stale: true`，`data_age_seconds` 为距那次采集的秒数；从没成功过则 `gpus` 为空、`data_age_seconds: null`。旧数据只存在内存里，所以 agent 应调用常驻的 HTTP 服务，命令行单次查询没有可回退的数据。
+每台主机结果带 `stale` 和 `data_age_seconds`：本次查询失败时（`ok: false`，`error` 为原因），若服务进程里有该主机上一次成功的数据，则 `gpus` 返回那份数据，`stale: true`，`data_age_seconds` 为距那次采集的秒数；从没成功过则 `gpus` 为空、`data_age_seconds: null`。
+
+运行中的任务每分钟并行检查每个节点的容器状态，任一节点容器被删除或退出即标为失败（红色——其余节点的容器可能还占着机器，仍需点「停止」清理，清理后才变灰）。
+
+旧数据只存在内存里，所以 agent 应调用常驻的 HTTP 服务，命令行单次查询没有可回退的数据。
 
 ## API
 

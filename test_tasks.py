@@ -114,8 +114,8 @@ class StoreTest(unittest.TestCase):
         p = patch.object(tasks, "TASKS_DIR", Path(tmp.name))
         p.start()
         self.addCleanup(p.stop)
-        # 线程改为同步执行, 测试里能直接看到最终状态
-        t = patch.object(tasks, "_bg", lambda fn, *args: fn(*args))
+        # 线程改为同步执行, 测试里能直接看到最终状态; 常驻巡检循环除外 (recover 会真跑死循环)
+        t = patch.object(tasks, "_bg", lambda fn, *args: [] if fn is tasks._monitor else fn(*args))
         t.start()
         self.addCleanup(t.stop)
 
@@ -273,6 +273,39 @@ class StoreTest(unittest.TestCase):
         for bad in ("x" * 41, "a\nb"):
             with self.assertRaisesRegex(tasks.TaskError, "创建者"):
                 tasks.create("job", "", CFG, "gpumon", bad)
+
+    def test_monitor_marks_broken_node_container(self):
+        _, ssh = self.fake_ssh()
+        with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
+            tid = tasks.create("job", "", CFG, "gpumon")["id"]
+        tasks.update(tid, status="running", started=1.0, containers_up=True)
+
+        def state(h, cmd, **kw):
+            return {"h1": "true\n", "h2": "gone\n"}[h]   # h2 的容器被删了
+        with patch.object(tasks, "_ssh", state):
+            tasks.monitor_once()
+        t = tasks.get(tid)
+        self.assertEqual((t["status"], t["containers_up"]), ("failed", True))   # 标红, 不当已清理
+        self.assertIn("h2: 容器已被删除", t["error"])
+
+        for out, want in (("false\n", "容器已退出"), ("true\n", None)):
+            tasks.update(tid, status="running", error=None)
+            with patch.object(tasks, "_ssh", lambda h, cmd, **kw: out):
+                tasks.monitor_once()
+            t = tasks.get(tid)
+            if want:
+                self.assertEqual(t["status"], "failed")
+                self.assertIn(want, t["error"])
+            else:
+                self.assertEqual(t["status"], "running")
+
+        tasks.update(tid, status="running", error=None)
+
+        def unreachable(h, cmd, **kw):
+            raise tasks.TaskError(f"{h}: 超时")
+        with patch.object(tasks, "_ssh", unreachable):
+            tasks.monitor_once()
+        self.assertEqual(tasks.get(tid)["status"], "running")   # ssh 不通: 不动
 
     def test_recover_marks_interrupted_launch(self):
         _, ssh = self.fake_ssh()
