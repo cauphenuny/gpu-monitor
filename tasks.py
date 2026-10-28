@@ -144,8 +144,9 @@ def parse_mounts(text):
     return mounts
 
 
-def validate(cfg, known_hosts):
-    """校验并规整前端提交的 config; env/mounts 保留原文, 复制任务时原样带回."""
+def validate(cfg, host_groups):
+    """校验并规整前端提交的 config; host_groups: {host: 分组集合} (无分组记为 '').
+    env/mounts 保留原文, 复制任务时原样带回."""
     if not isinstance(cfg, dict):
         raise TaskError("config 必须是对象")
     out = {k: str(cfg.get(k) or "") for k in ("image", "ifname", "env", "mounts", "entrypoint", "docker_args", "proxy")}
@@ -161,10 +162,22 @@ def validate(cfg, known_hosts):
         raise TaskError("请至少选择一台主机")
     if len(set(hosts)) != len(hosts):
         raise TaskError("主机重复")
-    unknown = [h for h in hosts if h not in known_hosts]
+    unknown = [h for h in hosts if h not in host_groups]
     if unknown:
         raise TaskError("主机未配置: " + ", ".join(unknown))
+    # 集群 = 主机分组; 所选主机必须同属一个集群, 不许跨. 指定了就按指定的校验, 没指定取交集
+    cluster = str(cfg.get("cluster") or "").strip()
+    if cluster:
+        bad = [h for h in hosts if cluster not in host_groups[h]]
+        if bad:
+            raise TaskError(f"主机不属于集群 {cluster}: " + ", ".join(bad))
+    else:
+        common = set.intersection(*(host_groups[h] or {""} for h in hosts))
+        if not common:
+            raise TaskError("所选主机跨集群, 请只选同一个分组内的主机")
+        cluster = sorted(common)[0]
     out["hosts"] = hosts
+    out["cluster"] = cluster
     # 节点数量: 必须与所选主机数一致才允许提交 (平台「工作节点数量」的对应物)
     nodes = cfg.get("nodes", len(hosts))
     try:

@@ -558,7 +558,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "请求必须是 JSON 对象"}, 400)
         try:
             if path == "/api/tasks":
-                cfg = tasks.validate(body.get("config"), {e["host"] for e in load_entries()})
+                groups = {}
+                for e in load_entries():   # 同一主机可在多个分组, 集群取分组
+                    groups.setdefault(e["host"], set()).add(e["group"])
+                cfg = tasks.validate(body.get("config"), groups)
                 # 前缀存在各用户浏览器里, 随请求带来
                 return self._json(tasks.create(body.get("name"), body.get("note"), cfg,
                                                str(body.get("prefix") or "gpumon"),

@@ -54,16 +54,23 @@ async function route(){
 }
 
 async function showList(){
-  const {tasks} = await api('/api/tasks');
+  const [{tasks}, {hosts: entries}] = await Promise.all([api('/api/tasks'), api('/api/hosts')]);
   if (location.hash.slice(1)) return;
+  const clusters = [...new Set([...entries.map(e => e.group), ...tasks.map(t => t.config.cluster)])].filter(c => c).sort();
+  const sel = $('#clusterSel');
+  const cur = localStorage.getItem('gpumon.clusterFilter') ?? '__all';
+  sel.innerHTML = '<option value="__all">全部集群</option>' + clusters.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  sel.value = clusters.includes(cur) || cur === '__all' ? cur : '__all';
+  sel.onchange = () => { localStorage.setItem('gpumon.clusterFilter', sel.value); showList(); };
+  const shown = sel.value === '__all' ? tasks : tasks.filter(t => t.config.cluster === sel.value);
   const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
-  $('#view').innerHTML = tasks.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
-    <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr>
+  $('#view').innerHTML = shown.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
+    <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${shown.map(t => `<tr>
       <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.creator ? ' · ' + esc(t.creator) : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
       <td>${badge(t)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
-    : '<div class="hint">还没有任务，点右上角「新建任务」</div>';
+    : `<div class="hint">还没有任务${sel.value === '__all' ? '' : `（集群 ${esc(sel.value)}）`}，点右上角「新建任务」</div>`;
   window.scrollTo(0, y);
   if (tasks.some(t => ACTIVE.includes(t.status))) pollTimer = setTimeout(route, 5000);
 }
@@ -78,6 +85,8 @@ async function showForm(fromId){
   }
   let picked = cfg.hosts.filter(h => entries.some(e => e.host === h));   // 勾选顺序即 hostfile 顺序
   let load = new Map();   // host → /api/status 结果; 查询要几秒, 先画名字, 到了再补负载
+  const groupsOf = h => new Set(entries.filter(e => e.host === h).map(e => e.group));
+  const clusterSel = () => $('#taskForm').elements.cluster.value;   // 表单渲染完才会被调用
   const field = (label, hint, input) => `<label class="field"><span>${label}${hint ? ` <small>${hint}</small>` : ''}</span>${input}</label>`;
   const area = (name, rows, mono = true) => `<textarea name="${name}" rows="${rows}" spellcheck="false"${mono ? ' class="mono"' : ''}>${esc(cfg[name])}</textarea>`;
   $('#view').innerHTML = `<form id="taskForm" class="form panel">
@@ -87,6 +96,7 @@ async function showForm(fromId){
     ${field('名称', '', `<input name="name" required maxlength="100" value="${esc(src?.name || '')}">`)}
     ${field('备注', '', `<textarea name="note" rows="2">${esc(src?.note || '')}</textarea>`)}
     ${field('镜像', '', `<input name="image" required class="mono" spellcheck="false" value="${esc(cfg.image)}">`)}
+    ${field('集群', '选某个分组后只能选该分组的主机；「自动」时点第一台主机自动锁定其所在集群', `<select name="cluster" class="inp"><option value="">自动</option>${[...groups.keys()].filter(g => g).map(g => `<option value="${esc(g)}"${cfg.cluster === g ? ' selected' : ''}>${esc(g)}</option>`).join('')}</select>`)}
     ${field('节点数量', '', `<input name="nodes" type="number" min="1" max="64" required value="${src?.config.nodes || src?.config.hosts?.length || cfg.nodes}">`)}
     <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为 head，entrypoint 在 head 上执行 · <b id="pickCnt"></b></small></span><div id="hostPick"></div></div>
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
@@ -98,15 +108,22 @@ async function showForm(fromId){
     <div class="form-a"><a class="btn ghost" href="#">取消</a><button class="primary" type="submit">提交</button></div>
   </form>`;
   const drawPick = () => {
+    const c = clusterSel();
     $('#pickCnt').textContent = `已选 ${picked.length} / 需 ${$('#taskForm').elements.nodes.value || '?'}`;
-    $('#hostPick').innerHTML = [...groups].map(([g, hs]) => `<div class="pick-g"><span class="pick-gn">${esc(g || '未分组')}</span>${hs.map(h => {
+    $('#hostPick').innerHTML = [...groups].map(([g, hs]) => `<div class="pick-g"><span class="pick-gn">${esc(g || '未分组')}</span>${hs.filter(h => !c || groupsOf(h).has(c)).map(h => {
       const i = picked.indexOf(h);
       return `<button type="button" class="chip${i >= 0 ? ' on' : ''}${i === 0 ? ' head' : ''}" data-h="${esc(h)}" aria-pressed="${i >= 0}"${disabled[h] ? ` title="已禁用：${esc(disabled[h])}"` : ''}>
         ${i >= 0 ? `<b>${i + 1}</b>` : ''}${esc(h)}${i === 0 ? '<span class="badge ok">head</span>' : ''}${loadHTML(load.get(h))}${disabled[h] ? '<span class="badge hot">禁用</span>' : ''}</button>`;
     }).join('')}</div>`).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
   };
+  const form = $('#taskForm');
   drawPick();
-  $('#taskForm').elements.nodes.addEventListener('input', drawPick);
+  form.elements.nodes.addEventListener('input', drawPick);
+  form.elements.cluster.addEventListener('change', () => {   // 换集群: 留下还属于它的已选主机
+    const c = clusterSel();
+    picked = picked.filter(h => !c || groupsOf(h).has(c));
+    drawPick();
+  });
   api('/api/status').then(d => {
     load = new Map(d.results.map(r => [r.host, r]));
     if ($('#hostPick')) drawPick();
@@ -115,9 +132,12 @@ async function showForm(fromId){
     const h = e.target.closest('[data-h]')?.dataset.h;
     if (!h) return;
     picked = picked.includes(h) ? picked.filter(x => x !== h) : [...picked, h];
+    if (!clusterSel()){   // 自动模式: 点第一台主机时锁定它所在的集群
+      const gs = [...groupsOf(h)];
+      if (gs.length === 1 && gs[0]) form.elements.cluster.value = gs[0];
+    }
     drawPick();
   });
-  const form = $('#taskForm');
   form.querySelector('.form-h').addEventListener('click', async e => {
     const act = e.target.closest('[data-json]')?.dataset.json;
     if (!act) return;
@@ -145,7 +165,7 @@ async function showForm(fromId){
     if (!picked.length) return notify('请至少选择一台主机');
     btn.disabled = true;
     try{
-      const config = {nodes, ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'].map(k => [k, f.get(k)]))};
+      const config = {nodes, cluster: f.get('cluster'), ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'].map(k => [k, f.get(k)]))};
       const t = await post('/api/tasks', {name: f.get('name'), note: f.get('note'), ...gpSettings(), config: {...config, hosts: picked}});
       location.hash = t.id;
     }catch(err){
@@ -190,6 +210,7 @@ function taskHead(t, cfgOpen){
     <div class="kv panel">
       <div><span>任务 ID</span><b>${t.id}</b></div>
       <div><span>创建者</span><b>${esc(t.creator || '—')}</b></div>
+      <div><span>集群</span><b>${esc(t.config.cluster || '未分组')}</b></div>
       <div><span>节点数量</span><b>${t.config.nodes ?? t.config.hosts.length}</b></div>
       <div class="wide"><span>容器名</span><b>${esc(t.container)}${t.containers_up ? '' : ' <small>(已清理)</small>'}</b></div>
       <div class="wide"><span>镜像</span><b>${esc(t.config.image)}</b></div>

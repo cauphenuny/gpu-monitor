@@ -31,18 +31,19 @@ class ParseTest(unittest.TestCase):
                 tasks.parse_mounts(bad)
 
     def test_validate(self):
-        out = tasks.validate(CFG, {"h1", "h2"})
+        out = tasks.validate(CFG, {"h1": {"G1"}, "h2": {"G1"}})
         self.assertEqual(out["hosts"], ["h1", "h2"])
+        self.assertEqual(out["cluster"], "G1")
         self.assertEqual(out["nodes"], 2)   # 缺省取所选主机数
-        self.assertEqual(tasks.validate({**CFG, "nodes": "2"}, {"h1", "h2"})["nodes"], 2)
+        self.assertEqual(tasks.validate({**CFG, "nodes": "2"}, {"h1": {"G1"}, "h2": {"G1"}})["nodes"], 2)
         for patch_, msg in (({"nodes": 3}, "恰好选择 3 台"), ({"nodes": 0}, "1~64"), ({"nodes": "x"}, "正整数")):
             with self.subTest(msg=msg), self.assertRaisesRegex(tasks.TaskError, msg):
-                tasks.validate({**CFG, **patch_}, {"h1", "h2"})
+                tasks.validate({**CFG, **patch_}, {"h1": {"G1"}, "h2": {"G1"}})
         for patch_, msg in (({"hosts": ["h1", "h1"]}, "重复"), ({"hosts": ["h3"]}, "未配置"),
                             ({"hosts": []}, "主机"), ({"image": "a b"}, "镜像"),
                             ({"ifname": "bond0;rm"}, "网卡"), ({"docker_args": "'"}, "docker")):
             with self.subTest(msg=msg), self.assertRaisesRegex(tasks.TaskError, msg):
-                tasks.validate({**CFG, **patch_}, {"h1", "h2"})
+                tasks.validate({**CFG, **patch_}, {"h1": {"G1"}, "h2": {"G1"}})
 
     def test_docker_run_cmd(self):
         cmd = tasks.docker_run_cmd("c", CFG, [("A", "1 2")], [("/s", "/d", True)])
@@ -68,12 +69,22 @@ class ParseTest(unittest.TestCase):
         self.assertNotIn("export http_proxy", tasks.setup_script("1.2.3.4"))
         self.assertIn("https?_proxy|HTTPS?_PROXY", tasks.setup_script("1.2.3.4", "p:1"))
         with self.assertRaisesRegex(tasks.TaskError, "代理"):
-            tasks.validate({**CFG, "proxy": "http://a b"}, {"h1", "h2"})
+            tasks.validate({**CFG, "proxy": "http://a b"}, {"h1": {"G1"}, "h2": {"G1"}})
 
     def test_sshd_keeps_container_path(self):
         # pam_env 会用 /etc/environment 覆盖 PATH, ssh 进来的 python3 就不是镜像里那个了
         self.assertIn("-o UsePAM=no", tasks.SETUP_SCRIPT)
         self.assertIn("PermitUserEnvironment=yes", tasks.SETUP_SCRIPT)
+
+    def test_cluster_validation(self):
+        g = {"h1": {"G1"}, "h2": {"G1", "G2"}, "h3": {"G2"}}
+        self.assertEqual(tasks.validate({**CFG, "cluster": "G1"}, g)["cluster"], "G1")          # 显式指定且都属 G1
+        self.assertEqual(tasks.validate(CFG, {"h1": {"G1"}, "h2": {"G1", "G2"}})["cluster"], "G1")  # 交集
+        self.assertEqual(tasks.validate(CFG, {"h1": {""}, "h2": {""}})["cluster"], "")          # 未分组
+        for cfg, msg, hg in ((CFG, "跨集群", {"h1": {"G1"}, "h2": {"G2"}}),
+                             ({**CFG, "cluster": "G2"}, "不属于集群 G2", {"h1": {"G1"}, "h2": {"G1"}})):
+            with self.subTest(msg=msg), self.assertRaisesRegex(tasks.TaskError, msg):
+                tasks.validate(cfg, hg)
 
     def test_docker_run_record(self):
         rec = tasks.docker_run_record("c", CFG, [("A", "1 2")], [("/s", "/d", True)])
