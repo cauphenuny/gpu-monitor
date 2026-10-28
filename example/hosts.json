@@ -1,136 +1,132 @@
 {
   "hosts": [
     {
-      "host": "zp-h200-005",
+      "host": "h200-005",
       "group": "H200"
     },
     {
-      "host": "zp-h200-006",
+      "host": "h200-006",
       "group": "H200"
     },
     {
-      "host": "zp-b300-018",
+      "host": "h200-007",
+      "group": "H200"
+    },
+    {
+      "host": "h200-008",
+      "group": "H200"
+    },
+    {
+      "host": "h200-003",
+      "group": "H200"
+    },
+    {
+      "host": "h200-004",
+      "group": "H200"
+    },
+    {
+      "host": "h200-001",
+      "group": "H200"
+    },
+    {
+      "host": "h200-002",
+      "group": "H200"
+    },
+    {
+      "host": "h200-025",
+      "group": "H200"
+    },
+    {
+      "host": "h200-026",
+      "group": "H200"
+    },
+    {
+      "host": "h200-027",
+      "group": "H200"
+    },
+    {
+      "host": "h200-028",
+      "group": "H200"
+    },
+    {
+      "host": "h200-029",
+      "group": "H200"
+    },
+    {
+      "host": "h200-030",
+      "group": "H200"
+    },
+    {
+      "host": "h200-031",
+      "group": "H200"
+    },
+    {
+      "host": "h200-032",
+      "group": "H200"
+    },
+    {
+      "host": "gb300-tray01",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray02",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray03",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray04",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray05",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray06",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray07",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray08",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray09",
+      "group": "GB300"
+    },
+    {
+      "host": "gb300-tray10",
+      "group": "GB300"
+    },
+    {
+      "host": "b300-018",
       "group": "B300"
     },
     {
-      "host": "zp-b300-020",
+      "host": "b300-020",
       "group": "B300"
     },
     {
-      "host": "zp-b300-017",
+      "host": "b300-017",
       "group": "B300"
     },
     {
-      "host": "zp-h200-007",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-008",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-003",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-004",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-001",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-002",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-025",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-026",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-027",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-028",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-029",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-030",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-031",
-      "group": "H200"
-    },
-    {
-      "host": "zp-h200-032",
-      "group": "H200"
-    },
-    {
-      "host": "zp-gb300-tray01",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray02",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray03",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray04",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray05",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray06",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray07",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray08",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray09",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-gb300-tray10",
-      "group": "GB300"
-    },
-    {
-      "host": "zp-b300-036",
+      "host": "b300-036",
       "group": "B300"
     },
     {
-      "host": "zp-b300-039",
+      "host": "b300-039",
       "group": "B300"
     },
     {
-      "host": "zp-b300-043",
+      "host": "b300-043",
       "group": "B300"
-    },
-    {
-      "host": "root@172.19.128.206",
-      "group": "B300 (Platform)"
     }
   ]
 }
