@@ -91,7 +91,7 @@ async function showList(){
   const items = [{value: '__all', label: '全部集群'}, ...clusters.map(c => ({value: c, label: c}))];
   const sel = clusterFilter ??= segControl($('#clusterSel'), items, {
     title: '按集群（主机分组）筛选任务列表',
-    onChange: v => { localStorage.setItem('gpumon.clusterFilter', v); showList(); },
+    onChange: v => { localStorage.setItem('gpumon.clusterFilter', v); reanimList = true; showList(); },
   });
   const cur = localStorage.getItem('gpumon.clusterFilter') ?? '__all';
   sel.setOptions(items);
