@@ -172,7 +172,7 @@ globalThis.document?.getElementById?.('updateBtn')?.addEventListener('click', as
   const t0 = Date.now();
   (function wait(){
     setTimeout(async () => {
-      try{ await fetch('/api/settings'); location.reload(); }
+      try{ await fetch('/api/hosts'); location.reload(); }
       catch{ Date.now() - t0 < 30000 ? wait() : notify('服务 30 秒内没有回来', '请手动刷新页面确认。'); }
     }, 1500);
   })();

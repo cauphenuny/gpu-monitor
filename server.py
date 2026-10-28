@@ -208,21 +208,6 @@ def set_disabled(host, reason):
     return d
 
 
-def load_settings():
-    with _lock:
-        s = _read_config().get("settings")
-    s = s if isinstance(s, dict) else {}
-    return {"docker_prefix": str(s.get("docker_prefix") or "gpumon")}
-
-
-def save_settings(settings):
-    with _lock:
-        data = _read_config()
-        data["settings"] = settings
-        _write_config(data)
-    return settings
-
-
 def _num(s):
     if s is None:
         return None
@@ -557,8 +542,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "offset 无效"}, 400)
             except tasks.TaskError as e:
                 self._json({"error": str(e)}, 400)
-        elif path == "/api/settings":
-            self._json(load_settings())
         else:
             self._json({"error": "not found"}, 404)
 
@@ -576,8 +559,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/tasks":
                 cfg = tasks.validate(body.get("config"), {e["host"] for e in load_entries()})
+                # 前缀存在各用户浏览器里, 随请求带来
                 return self._json(tasks.create(body.get("name"), body.get("note"), cfg,
-                                               load_settings()["docker_prefix"]))
+                                               str(body.get("prefix") or "gpumon"),
+                                               body.get("creator")))
             if path == "/api/update":
                 r = git_pull()
                 restarting = r["ok"] and r["changed"]
@@ -591,10 +576,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/tasks/stop":
                 t, errs = tasks.stop(body.get("id"))
                 return self._json({"task": t, "errors": errs})
-            prefix = str(body.get("docker_prefix") or "").strip()
-            if not tasks.PREFIX_RE.fullmatch(prefix):
-                raise tasks.TaskError("前缀只能含字母、数字、_ . -，以字母或数字开头，最长 40 字符")
-            self._json(save_settings({**load_settings(), "docker_prefix": prefix}))
         except tasks.TaskError as e:
             self._json({"error": str(e)}, 400)
 
@@ -602,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
         if _bad_host(self):
             return
         path = urllib.parse.urlparse(self.path).path
-        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/tasks/note", "/api/settings", "/api/update"):
+        if path in ("/api/tasks", "/api/tasks/stop", "/api/tasks/rename", "/api/tasks/note", "/api/update"):
             return self._task_post(path)
         if path == "/api/hosts/clear":
             if self.headers.get_content_type() != "application/json":

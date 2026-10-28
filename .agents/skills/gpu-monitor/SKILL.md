@@ -92,5 +92,5 @@ curl -s -X DELETE "$MON/api/tasks?id=<ID>" -H "X-GPUMon-Token: $TOKEN"  # 须先
 
 - 清空某台主机的 GPU 占用（占卡进程在容器里时 `docker stop -t 0` 整个容器）：
   `POST /api/hosts/clear {"host": "x", "confirmation": "x"}`（confirmation 必须逐字等于 host）。
-- 改容器名前缀（默认 gpumon）：`POST /api/settings {"docker_prefix": "ycp"}`。
+- 改容器名前缀（默认 gpumon）：顶层 `"prefix"`/`"creator"` 字段为容器名前缀与创建者（网页端存在各用户浏览器里；创建者会显示在任务上）。
 - 更新服务本身（git pull 后自重启，令牌随之轮换）：`POST /api/update`；已是最新时不动。

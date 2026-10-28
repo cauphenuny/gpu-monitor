@@ -59,7 +59,7 @@ async function showList(){
   const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
   $('#view').innerHTML = tasks.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
     <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr>
-      <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
+      <td><a href="#${t.id}">${esc(t.name)}</a><div class="sub">${t.id}${t.creator ? ' · ' + esc(t.creator) : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></td>
       <td>${badge(t)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
@@ -146,7 +146,7 @@ async function showForm(fromId){
     btn.disabled = true;
     try{
       const config = {nodes, ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'].map(k => [k, f.get(k)]))};
-      const t = await post('/api/tasks', {name: f.get('name'), note: f.get('note'), config: {...config, hosts: picked}});
+      const t = await post('/api/tasks', {name: f.get('name'), note: f.get('note'), ...gpSettings(), config: {...config, hosts: picked}});
       location.hash = t.id;
     }catch(err){
       btn.disabled = false;
@@ -189,6 +189,7 @@ function taskHead(t, cfgOpen){
     ${t.error ? `<div class="ban">${esc(t.error)}</div>` : ''}
     <div class="kv panel">
       <div><span>任务 ID</span><b>${t.id}</b></div>
+      <div><span>创建者</span><b>${esc(t.creator || '—')}</b></div>
       <div><span>节点数量</span><b>${t.config.nodes ?? t.config.hosts.length}</b></div>
       <div class="wide"><span>容器名</span><b>${esc(t.container)}${t.containers_up ? '' : ' <small>(已清理)</small>'}</b></div>
       <div class="wide"><span>镜像</span><b>${esc(t.config.image)}</b></div>
@@ -396,14 +397,45 @@ function remoteLog(id, task){
   if (task().containers_up) form.requestSubmit();
 }
 
+// 容器名前缀和创建者保存在本浏览器 (多人共用服务时各自独立), 创建任务时随请求带给服务端
+const gpSettings = () => ({prefix: localStorage.getItem('gpumon.docker_prefix') || 'gpumon',
+                           creator: localStorage.getItem('gpumon.creator') || ''});
+const saveSettings = s => { localStorage.setItem('gpumon.docker_prefix', s.prefix); localStorage.setItem('gpumon.creator', s.creator); };
+function settingsDialog(prompt = false){
+  const cur = gpSettings();
+  return new Promise(resolve => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dlg';
+    dlg.innerHTML = `<div class="dlg-t">设置</div>
+      <div class="dlg-d">保存在本浏览器，不影响其他用户；创建任务时会带上。${prompt ? '<br>多人共用此服务，建议先设置你的创建者和容器名前缀。' : ''}</div>
+      <label class="dlg-f">创建者<input class="dlg-i" name="creator" maxlength="40" placeholder="你的名字，显示在任务上" value="${esc(cur.creator)}" spellcheck="false"></label>
+      <label class="dlg-f">容器名前缀<input class="dlg-i mono" name="prefix" value="${esc(cur.prefix)}" spellcheck="false"></label>
+      <div class="dlg-a"><button type="button" class="ghost" data-no>取消</button><button type="button" class="primary" data-yes>保存</button></div>`;
+    const done = v => { if (!dlg.open) return resolve(v); dlg.close(); resolve(v); };
+    const val = () => { const p = dlg.querySelector('[name=prefix]').value.trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/.test(p)){ dlg.querySelector('[name=prefix]').focus(); return null; }
+      return {prefix: p, creator: dlg.querySelector('[name=creator]').value.trim().slice(0, 40)}; };
+    dlg.querySelector('[data-no]').addEventListener('click', () => done(null));
+    dlg.querySelector('[data-yes]').addEventListener('click', () => { const v = val(); if (v) done(v); });
+    dlg.addEventListener('cancel', e => { e.preventDefault(); done(null); });
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    dlg.querySelector('[name=creator]').focus();
+  });
+}
 $('#settingsBtn').addEventListener('click', async () => {
-  try{
-    const s = await api('/api/settings');
-    const v = await modal({title: '设置', desc: 'Docker 容器名前缀：新任务的容器名为「前缀-任务ID」', input: true, value: s.docker_prefix, ok: '保存'});
-    if (v != null) await post('/api/settings', {docker_prefix: v.trim()});
-  }catch(e){
-    notify('保存失败', e.message);
-  }
+  const s = await settingsDialog();
+  if (s) saveSettings(s);
 });
+// 进任务页时若两项还是默认值, 提示一次设置 (每个标签页会话只提示一次)
+setTimeout(async () => {
+  if (!location.pathname.startsWith('/tasks') || sessionStorage.getItem('gpumon.settingsPrompted')) return;
+  const {prefix, creator} = gpSettings();
+  if (prefix !== 'gpumon' || creator) return;
+  sessionStorage.setItem('gpumon.settingsPrompted', '1');
+  const s = await settingsDialog(true);
+  if (s) saveSettings(s);
+}, 600);
 window.addEventListener('hashchange', () => { scrollTo(0, 0); route(); });   // 只有真切换页面才回顶; 列表轮询也走 route, 不能动滚动
 route();

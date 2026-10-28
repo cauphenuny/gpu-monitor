@@ -484,14 +484,18 @@ def set_note(tid, note):
     return update(tid, note=str(note or ""))
 
 
-def create(name, note, cfg, prefix):
+def create(name, note, cfg, prefix, creator=""):
     name = _name(name)
     if not PREFIX_RE.fullmatch(prefix):
         raise TaskError("容器名前缀无效, 请在设置里修改")
+    creator = str(creator or "").strip()
+    if len(creator) > 40 or "\n" in creator or "\r" in creator:
+        raise TaskError("创建者需为不超过 40 字的单行文本")
     tid = time.strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(2)
     _dir(tid).mkdir(parents=True)
     container = f"{prefix}-{tid}"
-    t = {"id": tid, "name": name, "note": str(note or ""), "config": cfg, "container": container,
+    t = {"id": tid, "name": name, "note": str(note or ""), "creator": creator,
+         "config": cfg, "container": container,
          "docker_run": docker_run_record(container, cfg, [("MLP_TASK_ID", tid), *parse_env(cfg["env"])],
                                          parse_mounts(cfg["mounts"])),
          "status": "launching", "error": None, "containers_up": False, "stop_requested": False,

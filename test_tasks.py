@@ -254,6 +254,15 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(tasks.set_note(tid, "  epd, dp8 ")["note"], "  epd, dp8 ")
         self.assertEqual(tasks.set_note(tid, "")["note"], "")   # 空串清除
 
+    def test_create_stores_creator(self):
+        _, ssh = self.fake_ssh()
+        with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
+            t = tasks.create("job", "", CFG, "alice", " 张三 ")
+        self.assertEqual((t["creator"], t["container"]), ("张三", "alice-" + t["id"]))
+        for bad in ("x" * 41, "a\nb"):
+            with self.assertRaisesRegex(tasks.TaskError, "创建者"):
+                tasks.create("job", "", CFG, "gpumon", bad)
+
     def test_recover_marks_interrupted_launch(self):
         _, ssh = self.fake_ssh()
         with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
