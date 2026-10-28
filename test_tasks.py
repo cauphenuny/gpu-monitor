@@ -86,6 +86,16 @@ class ParseTest(unittest.TestCase):
             with self.subTest(msg=msg), self.assertRaisesRegex(tasks.TaskError, msg):
                 tasks.validate(cfg, hg)
 
+    def test_parse_ports(self):
+        self.assertEqual(tasks.parse_ports("30000, 29000 8080，30000"), [30000, 29000, 8080])
+        self.assertEqual(tasks.parse_ports(""), [])
+        for bad in ("0", "65536", "a", "8080-8090"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(tasks.TaskError, "端口无效"):
+                tasks.parse_ports(bad)
+        self.assertIn("for p in 2222 30000", tasks.port_checks([2222, 30000]))
+        with self.assertRaisesRegex(tasks.TaskError, "端口无效"):
+            tasks.validate({**CFG, "ports_head": "70000"}, {"h1": {"G1"}, "h2": {"G1"}})
+
     def test_docker_run_record(self):
         rec = tasks.docker_run_record("c", CFG, [("A", "1 2")], [("/s", "/d", True)])
         self.assertNotIn("--name", rec)
@@ -190,6 +200,19 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(sum("docker rm -f" in c[1] for c in calls), 2)
         tasks.delete(tid)
         self.assertEqual(tasks.list_tasks(), [])
+
+    def test_preflight_checks_declared_ports_per_role(self):
+        calls, ssh = self.fake_ssh()
+        with patch.object(tasks, "_ssh", ssh), patch.object(tasks.subprocess, "Popen", self.popen(b"")):
+            cfg = {**CFG, "ports_head": "30000,29000", "ports_nodes": "8080", "entrypoint": "echo hi"}
+            tasks.create("job", "", cfg, "gpumon")
+        # head 查 2222+head 专用; 普通节点查 2222+普通端口; 各自不含对方的
+        head_cmd = next(c for h, c in calls if h == "h1" and "/dev/tcp" in c)
+        node_cmd = next(c for h, c in calls if h == "h2" and "/dev/tcp" in c)
+        self.assertIn("for p in 2222 29000 30000", head_cmd)
+        self.assertNotIn(" 8080", head_cmd)
+        self.assertIn("for p in 2222 8080", node_cmd)
+        self.assertNotIn("30000", node_cmd)
 
     def test_stop_during_docker_run_cleans_up_late_container(self):
         state = {}

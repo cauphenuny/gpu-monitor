@@ -76,18 +76,24 @@ echo "[setup] 启动 sshd {ip}:{port}" >&2
 """
 
 # host 网络下各容器的 sshd 共用宿主机端口, 且 sshd 绑定失败时仍返回 0, 所以拉起前先查占用,
-# 并报出占用者: 按监听进程的 cgroup 找到所属容器, 找不到就是宿主机进程
-PORT_CHECK = r"""if (exec 3<>/dev/tcp/$ip/__PORT__) 2>/dev/null; then
+# 并报出占用者: 按监听进程的 cgroup 找到所属容器, 找不到就是宿主机进程. 端口写在 $p, 由外层 for 循环提供
+PORT_BODY = r"""if (exec 3<>/dev/tcp/$ip/$p) 2>/dev/null; then
   who="未知进程 (无权限查看)"
-  pid=$(ss -ltnpH "sport = :__PORT__" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  pid=$(ss -ltnpH "sport = :$p" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
   if [ -n "$pid" ]; then
     cmd=$(ps -o args= -p "$pid" 2>/dev/null | cut -c1-80)
     cid=$(grep -oE '[0-9a-f]{64}' "/proc/$pid/cgroup" 2>/dev/null | head -1)
     name=$([ -n "$cid" ] && timeout 5 docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')
     if [ -n "$name" ]; then who="容器 $name 里的进程 $pid ($cmd)"; else who="宿主机进程 $pid ($cmd)"; fi
   fi
-  echo "$ip:__PORT__ 已被$who占用, 请先停掉它" >&2; exit 1
-fi""".replace("__PORT__", str(SSH_PORT))
+  echo "$ip:$p 已被$who占用, 请先停掉它" >&2; exit 1
+fi"""
+
+
+def port_checks(ports):
+    """对一组端口 (含 2222) 生成检查脚本, 全部是校验过的整数, 可直接拼进 for 列表."""
+    body = PORT_BODY.replace("\n", "\n  ")
+    return "for p in " + " ".join(str(p) for p in ports) + "; do\n  " + body + "\ndone"
 
 _lock = threading.Lock()
 _ctx = threading.local()  # 拉起线程/每台主机的工作线程里记下当前任务, _ssh 据此把详细 trace 写进启动日志
@@ -144,12 +150,24 @@ def parse_mounts(text):
     return mounts
 
 
+def parse_ports(text):
+    """端口列表: 逗号/空格分隔, 1~65535, 去重."""
+    out = []
+    for tok in str(text or "").replace(",", " ").replace("，", " ").split():
+        if not tok.isdigit() or not 1 <= int(tok) <= 65535:
+            raise TaskError(f"端口无效: {tok} (应为 1~65535)")
+        if int(tok) not in out:
+            out.append(int(tok))
+    return out
+
+
 def validate(cfg, host_groups):
     """校验并规整前端提交的 config; host_groups: {host: 分组集合} (无分组记为 '').
     env/mounts 保留原文, 复制任务时原样带回."""
     if not isinstance(cfg, dict):
         raise TaskError("config 必须是对象")
-    out = {k: str(cfg.get(k) or "") for k in ("image", "ifname", "env", "mounts", "entrypoint", "docker_args", "proxy")}
+    out = {k: str(cfg.get(k) or "") for k in ("image", "ifname", "env", "mounts", "entrypoint", "docker_args", "proxy",
+                                              "ports_head", "ports_nodes")}
     out["image"], out["ifname"], out["proxy"] = out["image"].strip(), out["ifname"].strip(), out["proxy"].strip()
     if out["proxy"] and not PROXY_RE.fullmatch(out["proxy"]):
         raise TaskError("代理格式应为 http://host:port 或 host:port")
@@ -178,6 +196,8 @@ def validate(cfg, host_groups):
         cluster = sorted(common)[0]
     out["hosts"] = hosts
     out["cluster"] = cluster
+    parse_ports(out["ports_head"])   # head 专用端口: 只在 head 上查
+    parse_ports(out["ports_nodes"])  # 普通节点端口: 在除 head 外的每个节点上查
     # 节点数量: 必须与所选主机数一致才允许提交 (平台「工作节点数量」的对应物)
     nodes = cfg.get("nodes", len(hosts))
     try:
@@ -542,6 +562,8 @@ def _bring_up(tid):
     hosts, head = cfg["hosts"], cfg["hosts"][0]
     env = [("MLP_TASK_ID", tid), *parse_env(cfg["env"])]  # 平台同名变量, launch 脚本用它命名日志目录
     mounts = parse_mounts(cfg["mounts"])
+    head_ports = parse_ports(cfg.get("ports_head", ""))
+    node_ports = parse_ports(cfg.get("ports_nodes", ""))
 
     def stage(state, fn):
         if get(tid)["stop_requested"]:
@@ -561,14 +583,15 @@ def _bring_up(tid):
         return _each(tid, hosts, run)
 
     def preflight(h):
-        # docker -v 遇到不存在的源会静默建空目录, 先查
+        # docker -v 遇到不存在的源会静默建空目录, 先查; 端口按角色检查: head 的加上 head 专用, 其余加普通节点
         srcs = " ".join(shlex.quote(m[0]) for m in mounts)
         ifname = shlex.quote(cfg["ifname"])
+        ports = sorted({SSH_PORT, *(head_ports if h == head else ()), *(node_ports if h != head else ())})
         out = _ssh(h, _bash(f"""set -e
 for p in {srcs}; do [ -e "$p" ] || {{ echo "挂载源不存在: $p" >&2; exit 1; }}; done
 ip=$(ip -4 -o addr show dev {ifname} | awk '{{split($4, a, "/"); print a[1]; exit}}')
 [ -n "$ip" ] || {{ echo "网卡 {ifname} 上没有 IPv4" >&2; exit 1; }}
-{PORT_CHECK}
+{port_checks(ports)}
 echo "$ip $(nvidia-smi -L | grep -c ^GPU)"
 """), timeout=60)
         ip, gpus = out.split()

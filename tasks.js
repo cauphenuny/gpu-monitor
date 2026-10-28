@@ -2,9 +2,9 @@ const STATUS = {launching: ['启动中', 'warn'], running: ['运行中', 'ok'], 
   failed: ['失败', 'hot'], stopped: ['已停止', 'muted']};
 const ACTIVE = ['launching', 'running'];
 const LOG_HEAD = 1024 * 1024;   // 默认只看日志开头这么多字节, 超出的点「跳到末尾」再看
-const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'];   // 导入/导出剪贴板的字段, 不含主机
+const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes'];   // 导入/导出剪贴板的字段, 不含主机
 const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', mounts: '', entrypoint: '', proxy: '',
-  docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864'};
+  docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864', ports_head: '', ports_nodes: ''};
 let pollTimer = null;
 let clusterFilter = null;   // 顶栏集群筛选下拉, 跨轮询复用
 const seenTasks = new Set();   // 首次出现的任务行才播入场动画, 轮询重绘不动 (同监控页 seenCards)
@@ -136,6 +136,8 @@ async function showForm(fromId){
     ${field('节点数量', '', `<input name="nodes" type="number" min="1" max="64" required value="${src?.config.nodes || src?.config.hosts?.length || cfg.nodes}">`)}
     <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为 head，entrypoint 在 head 上执行 · <b id="pickCnt"></b></small></span><div id="hostPick"></div></div>
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
+    ${field('端口占用 · head', '逗号/空格分隔；启动前检查 head 上这些端口是否空闲，被占用则报错并指出占用者', `<input name="ports_head" class="mono" spellcheck="false" placeholder="如 30000,29000" value="${esc(cfg.ports_head || '')}">`)}
+    ${field('端口占用 · 普通节点', '逗号/空格分隔；检查除 head 外每个节点上的这些端口', `<input name="ports_nodes" class="mono" spellcheck="false" placeholder="如 8080" value="${esc(cfg.ports_nodes || '')}">`)}
     ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', area('env', 8))}
     ${field('挂载', '每行 src[:dst[:ro]]，dst 省略时同 src；src 须在每台主机上存在', area('mounts', 4))}
     ${field('Entrypoint', '全部容器就绪后在 head 上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', fsWrap(area('entrypoint', 16)))}
@@ -212,7 +214,7 @@ async function showForm(fromId){
     if (!picked.length) return notify('请至少选择一台主机');
     btn.disabled = true;
     try{
-      const config = {nodes, cluster: f.get('cluster'), ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy'].map(k => [k, f.get(k)]))};
+      const config = {nodes, cluster: f.get('cluster'), ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes'].map(k => [k, f.get(k)]))};
       const t = await post('/api/tasks', {name: f.get('name'), note: f.get('note'), ...gpSettings(), config: {...config, hosts: picked}});
       location.hash = t.id;
     }catch(err){
@@ -252,7 +254,7 @@ function taskHead(t, cfgOpen){
   const env = envRows(t.config.env), mounts = mountRows(t.config.mounts);
   return `<div class="form-h"><a href="#" class="back">‹ 任务</a><h2 class="rename" data-act="rename" title="点击修改名称">${esc(t.name)}</h2>${badge(t)}<span class="gspace"></span>
       <a class="btn" href="#new/${t.id}">复制</a>
-      ${live ? '<button type="button" class="btn danger" data-act="stop">停止</button>' : '<button type="button" class="btn" data-act="del">删除</button>'}</div>
+      ${live ? '<button type="button" class="btn danger" data-act="stop">停止</button>' : '<button type="button" class="btn" data-act="restart" title="删除此任务并以相同配置重新创建启动">重新启动</button><button type="button" class="btn" data-act="del">删除</button>'}</div>
     ${t.error ? `<div class="ban">${esc(t.error)}</div>` : ''}
     <div class="kv panel">
       <div><span>任务 ID</span><b>${t.id}</b></div>
@@ -272,7 +274,7 @@ function taskHead(t, cfgOpen){
     <details id="cfg" class="panel"${cfgOpen ? ' open' : ''}><summary>配置</summary>
       ${env.length ? `<div class="cfg-l">环境变量</div>${miniTable(['KEY', 'VALUE'], env)}` : ''}
       ${mounts.length ? `<div class="cfg-l">挂载</div>${miniTable(['主机路径', '容器路径', ''], mounts)}` : ''}
-      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">Entrypoint</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
+      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · head', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">Entrypoint</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
     </details>`;
 }
 
@@ -385,6 +387,17 @@ async function showTask(id){
         if (r.errors.length) notify('部分容器删除失败', r.errors.join('\n'));
       }catch(err){ notify('停止失败', err.message); }
       tick();
+    } else if (act === 'restart'){
+      if (!await modal({title: '重新启动任务？', desc: '将删除此任务（含记录和日志），并以相同的主机顺序与配置立即重新创建并启动。'
+        + (t.containers_up ? '\n现有容器会先停止清理。' : '') + '\n创建者/容器名前缀取当前浏览器的设置。', ok: '重启', danger: true})) return;
+      try{
+        if (t.containers_up) await post('/api/tasks/stop', {id});
+        await api('/api/tasks?id=' + encodeURIComponent(id), {method: 'DELETE'});
+        const nt = await post('/api/tasks', {name: t.name, note: t.note, ...gpSettings(), config: t.config});
+        location.hash = nt.id;
+      }catch(err){
+        notify('重启失败', err.message + '\n旧任务可能已删除，请刷新查看。');
+      }
     } else if (act === 'del'){
       if (!await modal({title: '删除任务记录？', desc: '配置和日志都会删除，无法恢复。', ok: '删除', danger: true})) return;
       try{

@@ -41,6 +41,7 @@ curl -s "$MON/api/tasks?id=<任务ID>"            # 单个任务: 状态、节�
 | image | 镜像，必填 |
 | hosts | 主机数组，**顺序即 /root/mpi_hostfile 顺序，第 1 台是 head**，entrypoint 只在 head 上跑 |
 | nodes | 节点数量（1~64），必须与 hosts 数量一致，否则拒绝创建 |
+| ports_head / ports_nodes | 端口占用声明（逗号/空格分隔）：head 组只在 head 上预检，nodes 组在其余节点预检；被占用则创建后的拉起在「检查主机」阶段失败并指出占用者 |
 | ifname | 互连网卡名，默认 `bond0`；预检会读它的 IPv4，读不到直接失败 |
 | env | 每行 `[export ]KEY=VALUE`，`#` 注释；不做 shell 展开 |
 | mounts | 每行 `src[:dst[:ro]]` 绝对路径；src 必须在每台主机存在；dst 不能覆盖 `/root/.ssh` 等 |
