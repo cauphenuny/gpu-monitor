@@ -264,7 +264,7 @@ a{color:var(--accent)}
 .panel{background:linear-gradient(180deg,#161d28 0%,#121822 100%);border:1px solid var(--line);border-radius:var(--r)}
 main.tasks{padding:16px 22px 44px;max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 #taskHead,.logbox{display:flex;flex-direction:column;gap:14px}
-.field .seg{flex-wrap:wrap}
+.field .seg{flex-wrap:wrap;align-self:flex-start}
 .mono,.tasks pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 .sub{color:var(--faint);font-size:11.5px;margin-top:2px}
 .tbl{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden}
