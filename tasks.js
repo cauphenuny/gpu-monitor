@@ -217,12 +217,12 @@ async function showTask(id){
       <div class="seg" id="logLvl" title="详细：额外显示每条远端命令、实时 stderr、退出码与耗时">
         <button type="button" data-l="info" class="on">简要</button><button type="button" data-l="debug">详细</button></div>
       <span id="logCap" class="log-cap" hidden>日志超过 1 MB，只显示开头部分 <button type="button" class="btn">跳到末尾并跟随</button></span>
-      <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，文本可含空格" title="文本：整段子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="logCnt"></span><span class="seg mini" id="logFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
+      <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="logCnt"></span><span class="seg mini" id="logFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
       <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="head 容器内的路径，目录或文件" title="在 head 容器里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
-      <button class="btn" type="submit">列出</button><button class="btn" type="button" id="rHead" title="从文件开头全量加载，适合搜索启动早期的日志；加载完继续跟随新内容">从头</button><button class="btn" type="button" id="rBack" hidden title="回到末尾跟随，只保留新内容">回末尾</button></form><span class="sub" id="rInfo"></span>
-      <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，文本可含空格" title="文本：整段子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
+      <button class="btn" type="submit">列出</button><span class="seg mini" id="rMode" title="末尾：只加载最后 64KB 并跟随；全量：从文件开头加载整个文件后继续跟随，适合搜索启动早期的日志"><button type="button" data-m="tail" class="on">末尾</button><button type="button" data-m="full">全量</button></span></form><span class="sub" id="rInfo"></span>
+      <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
       <div id="rFiles" class="rfiles"></div>
       ${fsWrap('<pre id="rLog" class="log panel"></pre>', ' id="rWrap" hidden')}</div>`;
   const pre = $('#log'), head = $('#taskHead'), cap = $('#logCap'), lvl = $('#logLvl'),
@@ -340,7 +340,7 @@ function remoteLog(id, task){
         if (r.reset) lf.reset();
         if (r.text) lf.emit(r.text);
         offset = r.offset; more = r.more;
-        info.textContent = `${path} · ${fmtBytes(r.size)} · ${fromStart ? '从头全量' : '末尾'} · ${new Date().toLocaleTimeString('zh-CN', {hour12: false})} 更新`;
+        info.textContent = `${path} · ${fmtBytes(r.size)} · ${new Date().toLocaleTimeString('zh-CN', {hour12: false})} 更新`;
       }
     }catch(e){
       if (!alive(my)) return;
@@ -351,14 +351,17 @@ function remoteLog(id, task){
   function open(path, fromStart = false){
     const my = ++gen;
     cur = {path, fromStart};
-    info.textContent = fromStart ? '从头加载中…' : '';
-    $('#rBack').hidden = !fromStart;
+    info.textContent = fromStart ? '全量加载中…' : '';
+    $('#rMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', (b.dataset.m === 'full') === fromStart));
     $('#rWrap').hidden = false; lf.reset();
     list.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', join(form.p.value.trim(), c.dataset.f) === path));
     follow(path, my, fromStart ? 0 : -1, fromStart);
   }
-  $('#rHead').addEventListener('click', () => cur && open(cur.path, true));
-  $('#rBack').addEventListener('click', () => cur && open(cur.path, false));
+  $('#rMode').addEventListener('click', e => {
+    const m = e.target.closest('[data-m]')?.dataset.m;
+    if (!m || !cur || (m === 'full') === cur.fromStart) return;
+    open(cur.path, m === 'full');
+  });
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const dir = form.p.value.trim();

@@ -90,7 +90,7 @@ function lineFilter(pre, input, cnt, seg, cap = 2e6){
     if (!m || m === mode) return;
     mode = m;
     seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.target.closest('[data-m]')));
-    input.placeholder = m === 'regex' ? '过滤，正则' : '过滤，文本可含空格';
+    input.placeholder = m === 'regex' ? '过滤，正则' : '过滤，子串匹配';
     compile();
     renderAll();
   });
