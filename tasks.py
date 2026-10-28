@@ -405,7 +405,10 @@ def _ssh(host, cmd, timeout=120, input=None, attempts=3, raw=False):
             _log(tid, f"→ 退出码 {rc}, {time.monotonic() - t0:.1f}s", host, debug=True)
         if not rc:
             return out if raw else out.decode(errors="replace")
-        msg = (err or out).decode(errors="replace").strip()
+        # known-hosts 提示只是噪音, 滤掉后再决定报什么; stderr 全是警告时用 stdout (真实错误常在那里)
+        quiet = lambda b: "\n".join(l for l in b.decode(errors="replace").splitlines()
+                                     if l.strip() and not l.startswith("Warning: Permanently added")).strip()
+        msg = quiet(err) or quiet(out)
         if i < attempts - 1 and rc == 255 and _TRANSIENT.search(msg):
             if tid:
                 _log(tid, f"ssh 瞬断, {2 * (i + 1)}s 后重试 ({i + 2}/{attempts})", host)
@@ -444,7 +447,10 @@ def _remove_containers(t):
     def rm(h):
         # 只有 docker 明确说没有这个容器才算删掉; dockerd 不通时 inspect 也会失败, 不能当成功
         name = shlex.quote(t["container"])
-        _ssh(h, _bash(f"docker rm -f {name} >/dev/null 2>&1; docker inspect {name} 2>&1 | grep -qi 'no such'"),
+        # 失败时把 inspect 的输出带回来, 别让真实原因被吞掉
+        _ssh(h, _bash(f"docker rm -f {name} >/dev/null 2>&1; "
+                      f"if docker inspect {name} >/dev/null 2>&1; then "
+                      f"echo \"容器仍存在:\"; docker inspect -f '{{{{.State.Status}}}} exit={{{{.State.ExitCode}}}}' {name}; exit 1; fi"),
              timeout=60)
     errs = []
     with ThreadPoolExecutor(len(t["config"]["hosts"])) as ex:

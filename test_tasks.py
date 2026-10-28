@@ -236,6 +236,14 @@ class StoreTest(unittest.TestCase):
         with self.assertRaisesRegex(tasks.TaskError, "已清理"):
             tasks.read_remote(tid, "/logs/x.log", 0)
 
+    def test_ssh_error_prefers_real_cause_over_hostkey_warnings(self):
+        def run(host, cmd, timeout, input, tid):
+            return 1, b"Error response from daemon: connection refused", \
+                b"Warning: Permanently added 'jump' (ED25519) to the list of known hosts.\n" * 2
+        with patch.object(tasks, "_run_ssh", run):
+            with self.assertRaisesRegex(tasks.TaskError, "Error response from daemon"):
+                tasks._ssh("h", "x")
+
     def test_rename(self):
         _, ssh = self.fake_ssh()
         with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
