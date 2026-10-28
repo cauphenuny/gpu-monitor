@@ -221,9 +221,12 @@ async function showTask(id){
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
       <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="head 容器内的路径，目录或文件" title="在 head 容器里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
-      <button class="btn" type="submit">列出</button><span class="seg mini" id="rMode" title="末尾：只加载最后 64KB 并跟随；全量：从文件开头加载整个文件后继续跟随，适合搜索启动早期的日志"><button type="button" data-m="tail" class="on">末尾</button><button type="button" data-m="full">全量</button></span></form><span class="sub" id="rInfo"></span>
-      <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
+      <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span></div>
       <div id="rFiles" class="rfiles"></div>
+      <div class="log-h rctl" id="rCtl" hidden>
+        <span class="seg mini" id="rMode" title="末尾：只加载最后 64KB 并跟随；全量：从文件开头加载整个文件后继续跟随，适合搜索启动早期的日志"><button type="button" data-m="tail" class="on">末尾</button><button type="button" data-m="full">全量</button></span>
+        <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span>
+      </div>
       ${fsWrap('<pre id="rLog" class="log panel"></pre>', ' id="rWrap" hidden')}</div>`;
   const pre = $('#log'), head = $('#taskHead'), cap = $('#logCap'), lvl = $('#logLvl'),
         fq = $('#logFilter'), cnt = $('#logCnt');
@@ -353,7 +356,7 @@ function remoteLog(id, task){
     cur = {path, fromStart};
     info.textContent = fromStart ? '全量加载中…' : '';
     $('#rMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', (b.dataset.m === 'full') === fromStart));
-    $('#rWrap').hidden = false; lf.reset();
+    $('#rWrap').hidden = false; $('#rCtl').hidden = false; lf.reset();
     list.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', join(form.p.value.trim(), c.dataset.f) === path));
     follow(path, my, fromStart ? 0 : -1, fromStart);
   }
@@ -367,7 +370,7 @@ function remoteLog(id, task){
     const dir = form.p.value.trim();
     localStorage.setItem(key, dir);
     gen++; clearTimeout(timer);
-    info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true; lf.reset();
+    info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true; $('#rCtl').hidden = true; lf.reset();
     try{
       const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}`);
       if (r.files.length === 1 && !r.files[0].name) return open(dir);   // 输入的就是文件
