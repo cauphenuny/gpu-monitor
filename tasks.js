@@ -293,11 +293,11 @@ async function showTask(id){
       <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="logCnt"></span><span class="seg mini" id="logFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
+      <span class="seg mini" id="rWhere" title="容器：主节点容器内的文件（需容器还在）；主机：主节点宿主机上的文件（容器清理后也可看，如共享存储上的日志）"><button type="button" data-m="container" class="on">容器</button><button type="button" data-m="host">主机</button></span>
       <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="路径，目录或文件" title="在所选视角（容器或主节点宿主机）里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
       <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span></div>
       <div id="rFiles" class="rfiles"></div>
       <div class="log-h rctl" id="rCtl" hidden>
-        <span class="seg mini" id="rWhere" title="容器：主节点容器内的文件（需容器还在）；主机：主节点宿主机上的文件（容器清理后也可看，如共享存储上的日志）"><button type="button" data-m="container" class="on">容器</button><button type="button" data-m="host">主机</button></span>
         <span class="seg mini" id="rMode" title="末尾：只加载最后 64KB 并跟随；全量：从文件开头加载整个文件后继续跟随，适合搜索启动早期的日志"><button type="button" data-m="tail" class="on">末尾</button><button type="button" data-m="full">全量</button></span>
         <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span>
       </div>
