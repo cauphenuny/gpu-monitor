@@ -138,7 +138,7 @@ async function showForm(fromId){
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
     ${field('端口占用 · head', '逗号/空格分隔；启动前检查 head 上这些端口是否空闲，被占用则报错并指出占用者', `<input name="ports_head" class="mono" spellcheck="false" placeholder="如 30000,29000" value="${esc(cfg.ports_head || '')}">`)}
     ${field('端口占用 · 普通节点', '逗号/空格分隔；检查除 head 外每个节点上的这些端口', `<input name="ports_nodes" class="mono" spellcheck="false" placeholder="如 8080" value="${esc(cfg.ports_nodes || '')}">`)}
-    ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', area('env', 8))}
+    ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', fsWrap(area('env', 8)))}
     ${field('挂载', '每行 src[:dst[:ro]]，dst 省略时同 src；src 须在每台主机上存在', area('mounts', 4))}
     ${field('Entrypoint', '全部容器就绪后在 head 上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', fsWrap(area('entrypoint', 16)))}
     ${field('安装 sshd 用的代理', '可选，如 http://proxy:8888；镜像里没有 sshd 时 apt 走这个代理，只在安装时生效，不进容器环境变量', `<input name="proxy" class="mono" spellcheck="false" placeholder="不填则直连" value="${esc(cfg.proxy || '')}">`)}
