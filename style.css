@@ -378,3 +378,7 @@ details#cfg .fs-wrap.fs>pre{max-height:none}
 .log-h .seg{padding:2px}
 .log-h .seg button{height:24px;padding:0 10px}
 .rctl{margin:-2px 0 -2px}   /* 文件行与控制行、控制行与日志之间收一点间距 */
+.kv b .copy{margin-left:6px;padding:0 5px;font-size:11px;line-height:1.6;color:var(--faint);background:transparent;border-color:transparent;vertical-align:1px}
+.kv b .copy:hover{color:var(--accent);border-color:var(--line)}
+.cfg-l .copy{margin-left:6px;padding:1px 6px;font-size:11px;color:var(--faint);background:transparent;border-color:transparent}
+.cfg-l .copy:hover{color:var(--accent);border-color:var(--line)}

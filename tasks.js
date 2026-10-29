@@ -248,6 +248,8 @@ const mountRows = text => cfgLines(text).map(l => { const [src, dst, ro] = l.spl
 const miniTable = (head, rows) => `<table class="mini-tbl"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
   <tbody>${rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 
+// kv 行里的小复制按钮; data-copy 指向 showTask 点击处理里取值的键
+const copyBtn = key => `<button type="button" class="copy" data-copy="${key}" title="复制到剪贴板" aria-label="复制">⧉</button>`;
 function taskHead(t, cfgOpen){
   const live = t.containers_up || ACTIVE.includes(t.status);
   const pre = (label, text) => text.trim() ? `<div class="cfg-l">${label}</div><pre>${esc(text)}</pre>` : '';
@@ -257,12 +259,12 @@ function taskHead(t, cfgOpen){
       ${live ? '<button type="button" class="btn danger" data-act="stop">停止</button>' : '<button type="button" class="btn" data-act="restart" title="删除此任务并以相同配置重新创建启动">重新启动</button><button type="button" class="btn" data-act="del">删除</button>'}</div>
     ${t.error ? `<div class="ban">${esc(t.error)}</div>` : ''}
     <div class="kv panel">
-      <div><span>任务 ID</span><b>${t.id}</b></div>
+      <div><span>任务 ID</span><b>${t.id}${copyBtn('id')}</b></div>
       <div><span>创建者</span><b>${esc(t.creator || '—')}</b></div>
       <div><span>集群</span><b>${esc(t.config.cluster || '未分组')}</b></div>
       <div><span>节点数量</span><b>${t.config.nodes ?? t.config.hosts.length}</b></div>
-      <div class="wide"><span>容器名</span><b>${esc(t.container)}${t.containers_up ? '' : ' <small>(已清理)</small>'}</b></div>
-      <div class="wide"><span>镜像</span><b>${esc(t.config.image)}</b></div>
+      <div class="wide"><span>容器名</span><b>${esc(t.container)}${t.containers_up ? '' : ' <small>(已清理)</small>'}${copyBtn('container')}</b></div>
+      <div class="wide"><span>镜像</span><b>${esc(t.config.image)}${copyBtn('image')}</b></div>
       <div><span>创建</span><b>${fmtTime(t.created)}</b></div><div><span>entrypoint 启动</span><b>${fmtTime(t.started)}</b></div>
       <div><span>结束</span><b>${fmtTime(t.ended)}</b></div><div><span>运行时长</span><b id="runFor"></b></div>
       <div class="wide"><span>备注</span><b class="edit" data-act="note" title="点击修改备注">${t.note ? esc(t.note) : '—'}</b></div>
@@ -274,7 +276,7 @@ function taskHead(t, cfgOpen){
     <details id="cfg" class="panel"${cfgOpen ? ' open' : ''}><summary>配置</summary>
       ${env.length ? `<div class="cfg-l">环境变量</div>${miniTable(['KEY', 'VALUE'], env)}` : ''}
       ${mounts.length ? `<div class="cfg-l">挂载</div>${miniTable(['主机路径', '容器路径', ''], mounts)}` : ''}
-      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · head', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">Entrypoint</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
+      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · head', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">Entrypoint ${copyBtn('entrypoint')}</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
     </details>`;
 }
 
@@ -368,6 +370,16 @@ async function showTask(id){
     tick();
   });
   head.addEventListener('click', async e => {
+    const b = e.target.closest('[data-copy]');
+    if (b){
+      const val = {id, container: t.container, image: t.config.image, entrypoint: t.config.entrypoint}[b.dataset.copy];
+      try{
+        await navigator.clipboard.writeText(val);
+        b.textContent = '✓';
+        setTimeout(() => { b.textContent = '⧉'; }, 900);
+      }catch(err){ notify('复制失败', err.message); }
+      return;
+    }
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'rename'){
       const name = await modal({title: '修改任务名称', input: true, value: t.name, ok: '保存'});
