@@ -533,11 +533,14 @@ class Handler(BaseHTTPRequestHandler):
         elif path in ("/api/tasks/files", "/api/tasks/tail"):
             qs = urllib.parse.parse_qs(parsed.query)
             tid, fpath = (qs.get("id") or [""])[0], (qs.get("path") or [""])[0]
+            where = (qs.get("where") or ["container"])[0]
+            if where not in ("container", "host"):
+                where = "container"
             try:
                 if path == "/api/tasks/files":
-                    self._json(tasks.list_files(tid, fpath))
+                    self._json(tasks.list_files(tid, fpath, where))
                 else:
-                    self._json(tasks.read_remote(tid, fpath, int((qs.get("offset") or ["-1"])[0])))
+                    self._json(tasks.read_remote(tid, fpath, int((qs.get("offset") or ["-1"])[0]), where))
             except ValueError:
                 self._json({"error": "offset 无效"}, 400)
             except tasks.TaskError as e:

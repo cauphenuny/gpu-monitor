@@ -688,23 +688,29 @@ def _follow(tid):
 REMOTE_TAIL = 64 * 1024  # 首次打开远端文件只看最后 64KB
 
 
-def _head_container(tid, path):
+def _head_container(tid, path, where="container"):
     t = get(tid)
-    if not t["containers_up"]:
-        raise TaskError("容器已清理, 无法查看")
+    if where == "container" and not t["containers_up"]:
+        raise TaskError("容器已清理, 无法查看; 可切到「主机」视角")
     path = str(path or "").strip()
     if not path.startswith("/") or "\n" in path:
-        raise TaskError("路径须为容器内的绝对路径")
-    return t["config"]["hosts"][0], t["container"], path
+        raise TaskError("路径须为绝对路径")
+    return t, t["config"]["hosts"][0], t["container"], path
 
 
-def list_files(tid, path):
-    """列出 head 容器里 path 下的文件 (最多 3 层, 200 个); path 是文件时只返回它自己."""
-    head, name, path = _head_container(tid, path)
+def _runner(t, head, name, where):
+    """容器视角经 docker exec, 主机视角直接在 head 宿主机上跑."""
+    return (lambda script: _in(name, script)) if where == "container" else (lambda script: _bash(script))
+
+
+def list_files(tid, path, where="container"):
+    """列出 head 容器 (where=container) 或 head 宿主机 (where=host) path 下的文件 (最多 3 层, 200 个); path 是文件时只返回它自己."""
+    t, head, name, path = _head_container(tid, path, where)
+    run = _runner(t, head, name, where)
     script = (f"p={shlex.quote(path)}; [ -e \"$p\" ] || {{ echo \"不存在: $p\" >&2; exit 1; }}; "
               "if [ -f \"$p\" ]; then stat -c '%s %Y' -- \"$p\" | tr '\\n' ' '; echo; "
               "else cd -- \"$p\" && find -L . -maxdepth 3 -type f -printf '%s %T@ %P\\n' 2>/dev/null | sort -k3 | head -200; fi")
-    out = _ssh(head, _in(name, script), timeout=30)
+    out = _ssh(head, run(script), timeout=30)
     files = []
     for line in out.splitlines():
         parts = line.split(" ", 2)
@@ -714,11 +720,12 @@ def list_files(tid, path):
     return {"path": path, "files": files}
 
 
-def read_remote(tid, path, offset):
-    """增量读 head 容器里的文件, 用法同 read_log; 文件被截断/轮转 (变得比 offset 小) 时 reset=True 从头读."""
-    head, name, path = _head_container(tid, path)
+def read_remote(tid, path, offset, where="container"):
+    """增量读 head 容器 (where=container) 或 head 宿主机 (where=host) 的文件, 用法同 read_log; 文件被截断/轮转 (变得比 offset 小) 时 reset=True 从头读."""
+    t, head, name, path = _head_container(tid, path, where)
+    run = _runner(t, head, name, where)
     q = shlex.quote(path)
-    out = _ssh(head, _in(name, f"s=$(stat -L -c %s -- {q}) || exit 1; o={int(offset)}; r=0; "
+    out = _ssh(head, run(f"s=$(stat -L -c %s -- {q}) || exit 1; o={int(offset)}; r=0; "
                                f"[ $o -lt 0 ] && o=$(( s > {REMOTE_TAIL} ? s - {REMOTE_TAIL} : 0 )); "
                                "[ $o -gt $s ] && { o=0; r=1; }; echo \"$s $o $r\"; "
                                f"tail -c +$((o + 1)) -- {q} | head -c {LOG_CHUNK}"), timeout=30, raw=True)

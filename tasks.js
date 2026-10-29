@@ -291,10 +291,11 @@ async function showTask(id){
       <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="logCnt"></span><span class="seg mini" id="logFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
-      <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="head 容器内的路径，目录或文件" title="在 head 容器里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
+      <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="路径，目录或文件" title="在所选视角（容器或 head 主机）里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
       <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span></div>
       <div id="rFiles" class="rfiles"></div>
       <div class="log-h rctl" id="rCtl" hidden>
+        <span class="seg mini" id="rWhere" title="容器：head 容器内的文件（需容器还在）；主机：head 宿主机上的文件（容器清理后也可看，如共享存储上的日志）"><button type="button" data-m="container" class="on">容器</button><button type="button" data-m="host">主机</button></span>
         <span class="seg mini" id="rMode" title="末尾：只加载最后 64KB 并跟随；全量：从文件开头加载整个文件后继续跟随，适合搜索启动早期的日志"><button type="button" data-m="tail" class="on">末尾</button><button type="button" data-m="full">全量</button></span>
         <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span>
       </div>
@@ -415,8 +416,13 @@ async function showTask(id){
 function remoteLog(id, task){
   const form = $('#rForm'), info = $('#rInfo'), list = $('#rFiles'), out = $('#rLog');
   const lf = lineFilter(out, $('#rFilter'), $('#rCnt'), $('#rFseg'), Infinity);   // 全量加载, 重画过滤时不丢前文
-  const key = 'gpumon.rpath.' + id;
-  form.p.value = localStorage.getItem(key) || '/logs';   // platform 启动脚本把本次日志目录软链到 /logs
+  // 视角 (容器/head 主机) 和目录都存浏览器, 全局共享, 不按任务分
+  let where = localStorage.getItem('gpumon.rwhere') || 'container';
+  form.p.value = localStorage.getItem('gpumon.rpath') || (where === 'host' ? '/mnt/ceph/workspace/ycp/logs' : '/logs');
+  const whereDD = segControl($('#rWhere'), [{value: 'container', label: '容器'}, {value: 'host', label: '主机'}],
+    {value: where, title: '容器：head 容器内的文件；主机：head 宿主机上的文件',
+     onChange: v => { where = v; localStorage.setItem('gpumon.rwhere', v); form.requestSubmit(); }});
+  whereDD.set(where, true);
   let gen = 0, timer = null;
   const alive = my => my === gen && location.hash.slice(1) === id;
   const join = (dir, name) => name ? dir.replace(/\/+$/, '') + '/' + name : dir;
@@ -425,12 +431,12 @@ function remoteLog(id, task){
     clearTimeout(timer);
     try{
       for (let more = true; more;){
-        const r = await api(`/api/tasks/tail?id=${id}&path=${encodeURIComponent(path)}&offset=${offset}`);
+        const r = await api(`/api/tasks/tail?id=${id}&path=${encodeURIComponent(path)}&offset=${offset}&where=${where}`);
         if (!alive(my)) return;
         if (r.reset) lf.reset();
         if (r.text) lf.emit(r.text);
         offset = r.offset; more = r.more;
-        info.textContent = `${path} · ${fmtBytes(r.size)} · ${new Date().toLocaleTimeString('zh-CN', {hour12: false})} 更新`;
+        info.textContent = `${where === 'host' ? '主机' : '容器'}:${path} · ${fmtBytes(r.size)} · ${new Date().toLocaleTimeString('zh-CN', {hour12: false})} 更新`;
       }
     }catch(e){
       if (!alive(my)) return;
@@ -455,11 +461,11 @@ function remoteLog(id, task){
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const dir = form.p.value.trim();
-    localStorage.setItem(key, dir);
+    localStorage.setItem('gpumon.rpath', dir);
     gen++; clearTimeout(timer);
     info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true; $('#rCtl').hidden = true; lf.reset();
     try{
-      const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}`);
+      const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}&where=${where}`);
       if (r.files.length === 1 && !r.files[0].name) return open(dir);   // 输入的就是文件
       info.textContent = r.files.length ? `${r.files.length} 个文件` : '目录下没有文件';
       list.innerHTML = r.files.map((f, i) => `<button type="button" class="chip in" data-f="${esc(f.name)}" style="--i:${Math.min(i, 12)}" title="${fmtTime(f.mtime)} 修改">
@@ -472,17 +478,17 @@ function remoteLog(id, task){
     const f = e.target.closest('[data-f]')?.dataset.f;
     if (f != null) open(join(form.p.value.trim(), f));
   });
-  const sync = () => {   // 容器清理后面板不可用; 已切走别的页面就停 (元素不在了)
+  const sync = () => {   // 容器视角下容器清理则不可用 (切到主机视角仍可看); 已切走别的页面就停
     const box = $('#rbox');
     if (!box || location.hash.slice(1) !== id) return;
-    const up = task().containers_up;
-    box.classList.toggle('off', !up);
-    form.querySelectorAll('input,button').forEach(x => x.disabled = !up);
-    if (!up && !info.textContent) info.textContent = '容器已清理，无法查看';
+    const off = where === 'container' && !task().containers_up;
+    box.classList.toggle('off', off);
+    form.querySelectorAll('input,button').forEach(x => x.disabled = off);
+    if (off && !info.textContent) info.textContent = '容器已清理，可切到「主机」视角查看宿主机文件';
     setTimeout(sync, 2000);
   };
   sync();
-  if (task().containers_up) form.requestSubmit();
+  if (task().containers_up || where === 'host') form.requestSubmit();
 }
 
 // 容器名前缀和创建者保存在本浏览器 (多人共用服务时各自独立), 创建任务时随请求带给服务端

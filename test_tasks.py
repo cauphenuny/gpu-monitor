@@ -278,6 +278,18 @@ class StoreTest(unittest.TestCase):
             with self.assertRaisesRegex(tasks.TaskError, "Error response from daemon"):
                 tasks._ssh("h", "x")
 
+    def test_host_view_reads_without_container(self):
+        calls, ssh = self.fake_ssh()
+        with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
+            tid = tasks.create("job", "", CFG, "gpumon")["id"]
+        tasks.update(tid, containers_up=False)
+        with patch.object(tasks, "_ssh", lambda h, cmd, **k: "5 0 0\nab\n".encode() if isinstance(cmd, str) else cmd) as m:
+            r = tasks.read_remote(tid, "/var/log/x.log", 0, "host")
+        self.assertEqual(r["text"], "ab\n")
+        # 容器视角在容器清理后报错, 主机视角不受影响
+        with self.assertRaisesRegex(tasks.TaskError, "主机"):
+            tasks.read_remote(tid, "/logs/x", 0, "container")
+
     def test_rename(self):
         _, ssh = self.fake_ssh()
         with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
