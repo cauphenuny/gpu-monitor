@@ -482,12 +482,7 @@ function remoteLog(id, task){
     info.textContent = '列出中…'; list.innerHTML = ''; $('#rWrap').hidden = true; $('#rCtl').hidden = true; lf.reset();
     try{
       const r = await api(`/api/tasks/files?id=${id}&path=${encodeURIComponent(dir)}&where=${where}`);
-      // 输入/记住的路径本身就是文件: 列成唯一的 chip, 点了才打开 (控制行跟着内容出现)
-      if (r.files.length === 1 && !r.files[0].name){
-        info.textContent = '';
-        list.innerHTML = `<button type="button" class="chip in" data-f="" style="--i:0" title="${fmtTime(r.files[0].mtime)} 修改">${esc(dir.split('/').pop() || dir)}<small>${fmtBytes(r.files[0].size)}</small></button>`;
-        return;
-      }
+      if (r.files.length === 1 && !r.files[0].name) return open(dir);   // 输入/记住的路径就是文件: 直接打开
       info.textContent = r.files.length ? `${r.files.length} 个文件` : '目录下没有文件';
       list.innerHTML = r.files.map((f, i) => `<button type="button" class="chip in" data-f="${esc(f.name)}" style="--i:${Math.min(i, 12)}" title="${fmtTime(f.mtime)} 修改">
         ${esc(f.name)}<small>${fmtBytes(f.size)}</small></button>`).join('');
