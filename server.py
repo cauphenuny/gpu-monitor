@@ -707,7 +707,10 @@ def main():
         ALLOWED_HOSTS = {f"{h}:{args.port}" for h in ("127.0.0.1", "localhost", "[::1]")}
         ALLOWED_HOSTS |= {h.lower() for h in args.allow_host}
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)
-    tasks.recover()
+    groups = {}
+    for e in load_entries():   # 同一主机可在多个分组
+        groups.setdefault(e["host"], set()).add(e["group"])
+    tasks.recover(groups)
     shown = args.bind if args.bind not in ("0.0.0.0", "::") else "127.0.0.1"
     print("GPU Monitor 已启动: http://%s:%d  (Ctrl+C 退出)" % (shown, args.port))
     print("提示: 在网页中添加的主机需可免密 ssh 登录 (ssh <host> 不提示输密码), 且装有 nvidia-smi")

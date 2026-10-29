@@ -798,10 +798,29 @@ def _monitor():
                     f.write(time.strftime("%F %T 巡检异常: ") + str(e) + "\n")
 
 
-def recover():
-    """服务启动时调用: 拉起中断的标失败; 运行中的接回 entrypoint 输出; 起容器巡检线程."""
+def derive_cluster(hosts, host_groups):
+    """主机 → 集群: 取所有主机分组的交集 (无分组算 ''). 空交集 (跨集群/未知主机) 返回 None."""
+    gs = [host_groups.get(h) for h in hosts]
+    if not gs or any(g is None for g in gs):
+        return None
+    common = set.intersection(*(g or {""} for g in gs))
+    return sorted(common)[0] if common else None
+
+
+def recover(host_groups=None):
+    """服务启动时调用: 拉起中断的标失败; 运行中的接回 entrypoint 输出; 起容器巡检线程.
+    host_groups 给出时, 给没有集群字段的存量任务按主机分组推导补上."""
     _bg(_monitor)
     for t in list_tasks():
+        if host_groups and not t["config"].get("cluster"):
+            c = derive_cluster(t["config"]["hosts"], host_groups)
+            if c is not None:
+                with _lock:
+                    cur = get(t["id"])
+                    if not cur["config"].get("cluster"):
+                        cur["config"]["cluster"] = c
+                        _save(cur)
+                _log(t["id"], f"按主机分组补记集群: {c}")
         if t.get("launch_active"):
             update(t["id"], launch_active=False)
         if t["status"] == "launching":

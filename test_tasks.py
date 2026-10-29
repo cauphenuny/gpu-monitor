@@ -330,6 +330,21 @@ class StoreTest(unittest.TestCase):
             tasks.monitor_once()
         self.assertEqual(tasks.get(tid)["status"], "running")   # ssh 不通: 不动
 
+    def test_recover_backfills_cluster_from_host_groups(self):
+        _, ssh = self.fake_ssh()
+        with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
+            a = tasks.create("a", "", CFG, "gpumon")["id"]                    # h1,h2
+            cross = tasks.create("b", "", {**CFG, "hosts": ["h1", "h3"]}, "gpumon")["id"]
+            gone = tasks.create("c", "", {**CFG, "hosts": ["h9"]}, "gpumon")["id"]
+        g = {"h1": {"G1"}, "h2": {"G1"}, "h3": {"G2"}}
+        with patch.object(tasks, "_ssh", ssh):
+            tasks.recover(g)
+        self.assertEqual(tasks.get(a)["config"]["cluster"], "G1")            # 交集推导
+        self.assertNotIn("cluster", tasks.get(cross)["config"])              # 跨集群: 不猜
+        self.assertNotIn("cluster", tasks.get(gone)["config"])               # 主机不在配置里: 不猜
+        tasks.recover(g)                                                     # 幂等, 不重复记日志
+        self.assertEqual(tasks.get(a)["config"]["cluster"], "G1")
+
     def test_recover_marks_interrupted_launch(self):
         _, ssh = self.fake_ssh()
         with patch.object(tasks, "_ssh", ssh), patch.object(tasks, "_launch"):
