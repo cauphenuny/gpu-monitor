@@ -33,7 +33,8 @@ python3 server.py            # 默认监听 http://127.0.0.1:8799
     - 主机：从监控页已添加的主机里按分组点选，**点选顺序即 hostfile 顺序**，第 1 台为主节点；已禁用的主机会标出，但仍可选
     - 网卡：默认 `bond0`，取该网卡的 IPv4 作为容器互连和 hostfile 地址
     - 环境变量：每行 `[export ]KEY=VALUE`，`#` 开头为注释；VALUE 外层成对的引号会去掉，不做 shell 展开
-    - 安装 sshd 用的代理（可选）：镜像里没有 sshd 时 apt 走这个代理（`http_proxy`/`https_proxy`），只在安装期间生效，不写进容器环境变量
+    - sshd 离线包目录（可选）：主机上的绝对路径；首次启动在该主机用 `apt-get --download-only` 下载 openssh deb（含依赖）缓存到此目录，之后每次起容器挂载它、在容器内 `dpkg -i` 离线安装，不再联网
+    - 安装 sshd 用的代理（可选）：镜像里没有 sshd 时 apt 走这个代理（下载离线包时同样使用），只在安装期间生效，不写进容器环境变量
     - 挂载：每行 `src[:dst[:ro]]`，dst 省略时同 src，须为绝对路径；src 须在每台主机上存在。dst 不能是 `/`、`/root`，也不能覆盖 `/root/.ssh`、`/root/.gpumon`、`/root/mpi_hostfile`（否则推入的 ssh 文件会改写宿主机上的同名文件）
     - Entrypoint：bash 脚本，在 head 容器里执行；留空则只拉起容器
     - docker run 额外参数：按 shell 规则拆分后追加，默认 `--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864`

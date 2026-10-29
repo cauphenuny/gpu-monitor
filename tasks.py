@@ -63,14 +63,20 @@ SSH_CONFIG = """Host {ips}
 # 关掉 PAM: 否则 pam_env 会用镜像的 /etc/environment 覆盖 PATH (如丢掉 /opt/torch/bin), 互连只用 key 登录, 不需要 PAM.
 SETUP_SCRIPT = """set -e
 if ! command -v sshd >/dev/null && [ ! -x /usr/sbin/sshd ]; then
-  echo "[setup] 镜像里没有 sshd, 用 apt 安装 openssh-server{proxy_note}" >&2
-  {proxy_env}
-  # policy-rc.d 拦住 postinst 自动起 sshd (宿主机 sshd 已占 22, 起不来会让安装报错)
-  [ -e /usr/sbin/policy-rc.d ] || {{ printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d; rm_policy=1; }}
-  apt-get update -qq
-  echo "[setup] apt-get update 完成, 开始安装" >&2
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openssh-server openssh-client >/dev/null
-  [ -z "${{rm_policy:-}}" ] || rm -f /usr/sbin/policy-rc.d
+  if ls /root/.gpumon-debs/*.deb >/dev/null 2>&1; then
+    echo "[setup] 镜像里没有 sshd, 用缓存的 deb 离线安装" >&2
+    dpkg -i /root/.gpumon-debs/*.deb >/dev/null 2>&1 || {{ echo "[setup] dpkg 有依赖缺口, 回退 apt"; {proxy_env}
+      apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openssh-server openssh-client >/dev/null; }}
+  else
+    echo "[setup] 镜像里没有 sshd, 用 apt 安装 openssh-server{proxy_note}" >&2
+    {proxy_env}
+    # policy-rc.d 拦住 postinst 自动起 sshd (宿主机 sshd 已占 22, 起不来会让安装报错)
+    [ -e /usr/sbin/policy-rc.d ] || {{ printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d; rm_policy=1; }}
+    apt-get update -qq
+    echo "[setup] apt-get update 完成, 开始安装" >&2
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openssh-server openssh-client >/dev/null
+    [ -z "${{rm_policy:-}}" ] || rm -f /usr/sbin/policy-rc.d
+  fi
   echo "[setup] openssh-server 安装完成" >&2
 fi
 mkdir -p /run/sshd && ssh-keygen -A >/dev/null
@@ -171,7 +177,10 @@ def validate(cfg, host_groups):
     if not isinstance(cfg, dict):
         raise TaskError("config 必须是对象")
     out = {k: str(cfg.get(k) or "") for k in ("image", "ifname", "env", "mounts", "entrypoint", "docker_args", "proxy",
-                                              "ports_head", "ports_nodes")}
+                                              "ports_head", "ports_nodes", "sshd_debs")}
+    out["sshd_debs"] = out["sshd_debs"].strip()
+    if out["sshd_debs"] and not out["sshd_debs"].startswith("/"):
+        raise TaskError("sshd 离线包目录须为主机上的绝对路径")
     out["image"], out["ifname"], out["proxy"] = out["image"].strip(), out["ifname"].strip(), out["proxy"].strip()
     if out["proxy"] and not PROXY_RE.fullmatch(out["proxy"]):
         raise TaskError("代理格式应为 http://host:port 或 host:port")
@@ -223,7 +232,8 @@ def validate(cfg, host_groups):
 
 
 def setup_script(ip, proxy=""):
-    """容器内装/起 sshd; proxy 只在 apt 安装期间生效, 不写进容器环境."""
+    """容器内装/起 sshd; proxy 只在 apt 安装期间生效, 不写进容器环境.
+    挂了 /root/.gpumon-debs (任务设了 sshd_debs) 时优先离线 dpkg 安装."""
     q = shlex.quote(proxy if "://" in proxy else f"http://{proxy}") if proxy else ""
     return SETUP_SCRIPT.format(
         port=SSH_PORT, ip=ip, proxy_note=f" (代理 {proxy})" if proxy else "",
@@ -232,6 +242,8 @@ def setup_script(ip, proxy=""):
 
 def docker_run_cmd(name, cfg, env, mounts):
     cmd = ["docker", "run", "-d", "--name", name, *DOCKER_BASE, *shlex.split(cfg["docker_args"])]
+    if cfg.get("sshd_debs"):
+        cmd += ["-v", f"{cfg['sshd_debs']}:/root/.gpumon-debs:ro"]   # 离线装 sshd 用
     for k, v in env:
         cmd += ["-e", f"{k}={v}"]
     for src, dst, ro in mounts:
@@ -621,6 +633,25 @@ echo "$ip $(nvidia-smi -L | grep -c ^GPU)"
     try:
         info = stage("检查主机", preflight)
         image = shlex.quote(cfg["image"])
+
+        def prep_debs(h):
+            """主机上缓存 openssh deb (含依赖); 已有 openssh-server*.deb 就跳过, 全程只在第一次联网."""
+            d = shlex.quote(debs)
+            proxy = cfg.get("proxy", "").strip()
+            p = shlex.quote(proxy if "://" in proxy or not proxy else f"http://{proxy}")
+            export = f"export http_proxy={p} https_proxy={p};" if proxy else ""
+            _ssh(h, _bash(f"""set -e
+mkdir -p {d}
+if ls {d}/openssh-server_*.deb >/dev/null 2>&1; then echo "[prep] sshd 离线包已缓存, 跳过下载"; exit 0; fi
+echo "[prep] 首次缓存 openssh deb (含依赖) 到 {d}"
+{export} apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --download-only --no-install-recommends openssh-server openssh-client
+cp -n /var/cache/apt/archives/*.deb {d}/ 2>/dev/null || true
+ls {d}/openssh-server_*.deb >/dev/null 2>&1 || {{ echo "下载后仍未找到 openssh-server deb" >&2; exit 1; }}"""), timeout=600)
+
+        debs = cfg.get("sshd_debs", "").strip()
+        if debs:
+            stage("准备 sshd 离线包", prep_debs)
         stage("拉取镜像", lambda h: _ssh(h, _bash(f"docker image inspect {image} >/dev/null 2>&1 "
                                               f"|| docker pull -q {image}"), timeout=3600))
         _advance(tid, containers_up=True)

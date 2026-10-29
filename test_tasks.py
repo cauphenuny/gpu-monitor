@@ -86,6 +86,16 @@ class ParseTest(unittest.TestCase):
             with self.subTest(msg=msg), self.assertRaisesRegex(tasks.TaskError, msg):
                 tasks.validate(cfg, hg)
 
+    def test_sshd_debs_offline(self):
+        out = tasks.validate({**CFG, "sshd_debs": "/root/sshd-debs"}, {"h1": {"G1"}, "h2": {"G1"}})
+        self.assertEqual(out["sshd_debs"], "/root/sshd-debs")
+        cmd = tasks.docker_run_cmd("c", out, [], [])
+        self.assertIn("-v", cmd)
+        self.assertIn("/root/sshd-debs:/root/.gpumon-debs:ro", cmd)   # 离线包挂进容器
+        self.assertIn("dpkg -i /root/.gpumon-debs", tasks.setup_script("1.2.3.4"))
+        with self.assertRaisesRegex(tasks.TaskError, "绝对路径"):
+            tasks.validate({**CFG, "sshd_debs": "rel/debs"}, {"h1": {"G1"}, "h2": {"G1"}})
+
     def test_parse_ports(self):
         self.assertEqual(tasks.parse_ports("30000, 29000 8080，30000"), [30000, 29000, 8080])
         self.assertEqual(tasks.parse_ports(""), [])

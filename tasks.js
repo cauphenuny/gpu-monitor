@@ -3,9 +3,9 @@ const STATUS = {launching: ['启动中', 'warn'], running: ['运行中', 'ok'], 
 const ACTIVE = ['launching', 'running'];
 const LOG_HEAD = 1024 * 1024;   // 启动日志默认只看开头这么多字节, 超出的点「跳到末尾」再看
 const OUT_HEAD = 256 * 1024;    // 入口脚本输出只显示开头 256KB, 后面的不看
-const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes'];   // 导入/导出剪贴板的字段, 不含主机
+const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes', 'sshd_debs'];   // 导入/导出剪贴板的字段, 不含主机
 const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', mounts: '', entrypoint: '', proxy: '',
-  docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864', ports_head: '', ports_nodes: ''};
+  docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864', ports_head: '', ports_nodes: '', sshd_debs: ''};
 let pollTimer = null;
 let clusterFilter = null;   // 顶栏集群筛选下拉, 跨轮询复用
 const seenTasks = new Set();   // 首次出现的任务行才播入场动画, 轮询重绘不动 (同监控页 seenCards)
@@ -142,7 +142,8 @@ async function showForm(fromId){
     ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', fsWrap(area('env', 8)))}
     ${field('挂载', '每行 src[:dst[:ro]]，dst 省略时同 src；src 须在每台主机上存在', area('mounts', 4))}
     ${field('入口脚本', '全部容器就绪后在主节点上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', fsWrap(area('entrypoint', 16)))}
-    ${field('安装 sshd 用的代理', '可选，如 http://proxy:8888；镜像里没有 sshd 时 apt 走这个代理，只在安装时生效，不进容器环境变量', `<input name="proxy" class="mono" spellcheck="false" placeholder="不填则直连" value="${esc(cfg.proxy || '')}">`)}
+    ${field('sshd 离线包目录', '可选，主机上的绝对路径；首次启动在该主机下载 openssh deb（含依赖）缓存到此，之后每次起容器都离线安装、不再联网', `<input name="sshd_debs" class="mono" spellcheck="false" placeholder="如 /root/sshd-debs" value="${esc(cfg.sshd_debs || '')}">`)}
+    ${field('安装 sshd 用的代理', '可选，如 http://proxy:8888；镜像里没有 sshd 时 apt 走这个代理（下载离线包时也用），只在安装期间生效，不进容器环境变量', `<input name="proxy" class="mono" spellcheck="false" placeholder="不填则直连" value="${esc(cfg.proxy || '')}">`)}
     ${field('docker run 额外参数', '已固定 --gpus all --network host --ipc private --privileged；/dev/shm 大小用 --shm-size 指定，不写则只有 docker 默认的 64MB', `<input name="docker_args" class="mono" spellcheck="false" value="${esc(cfg.docker_args)}">`)}
     <div class="form-a"><a class="btn ghost" href="#">取消</a><button class="primary" type="submit">提交</button></div>
   </form>`;
@@ -215,7 +216,7 @@ async function showForm(fromId){
     if (!picked.length) return notify('请至少选择一台主机');
     btn.disabled = true;
     try{
-      const config = {nodes, cluster: f.get('cluster'), ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes'].map(k => [k, f.get(k)]))};
+      const config = {nodes, cluster: f.get('cluster'), ...Object.fromEntries(['image', 'ifname', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes', 'sshd_debs'].map(k => [k, f.get(k)]))};
       const t = await post('/api/tasks', {name: f.get('name'), note: f.get('note'), ...gpSettings(), config: {...config, hosts: picked}});
       location.hash = t.id;
     }catch(err){
@@ -277,7 +278,7 @@ function taskHead(t, cfgOpen){
     <details id="cfg" class="panel"${cfgOpen ? ' open' : ''}><summary>配置</summary>
       ${env.length ? `<div class="cfg-l">环境变量</div>${miniTable(['KEY', 'VALUE'], env)}` : ''}
       ${mounts.length ? `<div class="cfg-l">挂载</div>${miniTable(['主机路径', '容器路径', ''], mounts)}` : ''}
-      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · 主节点', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">入口脚本 ${copyBtn('entrypoint')}</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
+      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · 主节点', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${pre('sshd 离线包目录', t.config.sshd_debs || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">入口脚本 ${copyBtn('entrypoint')}</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
     </details>`;
 }
 

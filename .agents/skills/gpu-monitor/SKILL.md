@@ -47,7 +47,8 @@ curl -s "$MON/api/tasks?id=<任务ID>"            # 单个任务: 状态、节�
 | mounts | 每行 `src[:dst[:ro]]` 绝对路径；src 必须在每台主机存在；dst 不能覆盖 `/root/.ssh` 等 |
 | entrypoint | 容器全部就绪后在 head 上用 bash 执行；留空只拉起容器 |
 | docker_args | 额外 docker run 参数，如 `--shm-size 1500g --memory 1780g`（已固定 `--gpus all --network host --ipc private --privileged --entrypoint sleep`） |
-| proxy | 可选，镜像缺 sshd 时 apt 走的代理，`http://host:port` |
+| sshd_debs | 可选，主机上的目录；首次启动下载 openssh deb（含依赖）缓存于此，之后容器内 `dpkg -i` 离线安装 |
+| proxy | 可选，镜像缺 sshd 时 apt 走的代理（下载离线包时同样使用），`http://host:port` |
 
 ```bash
 curl -s -X POST $MON/api/tasks -H "Content-Type: application/json" -H "X-GPUMon-Token: $TOKEN" -d '{
