@@ -5,8 +5,10 @@
 
 浏览器打开 http://127.0.0.1:8799,在页面上增删主机(可分组);服务端通过本机
 ssh (支持 ~/.ssh/config 别名与密钥) 到各主机并行执行 nvidia-smi 并汇总返回。
-配置持久化在同目录 hosts.json ({"hosts": [{"host":..,"group":..},..]},
-兼容旧版纯主机名列表,读取时自动迁移)。仅依赖 Python3 标准库。
+配置持久化在数据目录的 hosts.json ({"hosts": [{"host":..,"group":..},..]},
+兼容旧版纯主机名列表,读取时自动迁移)。数据目录默认与代码同目录, 可经
+GPUMON_STATE_DIR 环境变量另行指定 (tasks/ 任务数据同在其中), 代码目录可
+因此保持只读。仅依赖 Python3 标准库。
 """
 
 import argparse
@@ -29,6 +31,11 @@ from pathlib import Path
 import tasks
 
 ROOT = Path(__file__).resolve().parent
+# 数据目录 (hosts.json 与 tasks/) 默认与代码同目录; 经 GPUMON_STATE_DIR
+# 环境变量另行指定后, 代码目录可保持只读 (如 NixOS store 分发)。
+STATE_DIR = Path(os.environ["GPUMON_STATE_DIR"]).expanduser().resolve() \
+    if os.environ.get("GPUMON_STATE_DIR") else ROOT
+STATE_DIR.mkdir(parents=True, exist_ok=True)
 STATIC = {  # URL → (文件, Content-Type)
     "/": ("index.html", "text/html; charset=utf-8"),
     "/tasks": ("tasks.html", "text/html; charset=utf-8"),
@@ -37,7 +44,7 @@ STATIC = {  # URL → (文件, Content-Type)
     "/tasks.js": ("tasks.js", "application/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
-CONFIG_FILE = ROOT / "hosts.json"
+CONFIG_FILE = STATE_DIR / "hosts.json"
 CLEAR_TOKEN = secrets.token_urlsafe(32)
 # 监听本机时只认这些 Host 头, 防 DNS rebinding 读走页面令牌后起特权容器; None 表示不校验
 ALLOWED_HOSTS = None

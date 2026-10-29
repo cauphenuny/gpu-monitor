@@ -66,7 +66,7 @@ nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=c
 
 进程已运行时长通过 Linux `ps -o pid=,etimes=` 按 GPU 进程 PID 批量查询，API 字段 `elapsed_seconds` 单位为秒；查询不到为 `null`，页面显示 `--`。时长截至本次采集，随刷新更新，表示进程本身的运行时间。
 
-配置保存在同目录 `hosts.json`：
+配置保存在数据目录的 `hosts.json`（默认与代码同目录；设置环境变量 `GPUMON_STATE_DIR` 后改到该目录，`tasks/` 任务数据同样存放在那里，代码目录因此可以只读，适配以只读 store 分发代码的部署方式）：
 
 ```json
 { "hosts": [ {"host": "lab-gpu-01", "group": "机房1"}, {"host": "lab-gpu-02", "group": "机房1"} ] }
