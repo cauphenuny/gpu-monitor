@@ -134,13 +134,13 @@ async function showForm(fromId){
     ${field('镜像', '', `<input name="image" required class="mono" spellcheck="false" value="${esc(cfg.image)}">`)}
     ${field('集群', '选某个分组后只能选该分组的主机；「自动」时点第一台主机自动锁定其所在集群', `<input type="hidden" name="cluster" value="${esc(cfg.cluster || '')}"><div id="clusterDD"></div>`)}
     ${field('节点数量', '', `<input name="nodes" type="number" min="1" max="64" required value="${src?.config.nodes || src?.config.hosts?.length || cfg.nodes}">`)}
-    <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为 head，entrypoint 在 head 上执行 · <b id="pickCnt"></b></small></span><div id="hostPick"></div></div>
+    <div class="field"><span>主机 <small>按点选顺序写入 /root/mpi_hostfile，第 1 台为主节点，入口脚本在主节点上执行 · <b id="pickCnt"></b></small></span><div id="hostPick"></div></div>
     ${field('网卡', '取该网卡的 IPv4 作为容器互连与 hostfile 地址', `<input name="ifname" required class="mono" value="${esc(cfg.ifname)}">`)}
-    ${field('端口占用 · head', '逗号/空格分隔；启动前检查 head 上这些端口是否空闲，被占用则报错并指出占用者', `<input name="ports_head" class="mono" spellcheck="false" placeholder="如 30000,29000" value="${esc(cfg.ports_head || '')}">`)}
-    ${field('端口占用 · 普通节点', '逗号/空格分隔；检查除 head 外每个节点上的这些端口', `<input name="ports_nodes" class="mono" spellcheck="false" placeholder="如 8080" value="${esc(cfg.ports_nodes || '')}">`)}
+    ${field('端口占用 · 主节点', '逗号/空格分隔；启动前检查主节点上这些端口是否空闲，被占用则报错并指出占用者', `<input name="ports_head" class="mono" spellcheck="false" placeholder="如 30000,29000" value="${esc(cfg.ports_head || '')}">`)}
+    ${field('端口占用 · 普通节点', '逗号/空格分隔；检查除主节点外每个节点上的这些端口', `<input name="ports_nodes" class="mono" spellcheck="false" placeholder="如 8080" value="${esc(cfg.ports_nodes || '')}">`)}
     ${field('环境变量', '每行 [export ]KEY=VALUE，# 开头为注释；不做 shell 展开', fsWrap(area('env', 8)))}
     ${field('挂载', '每行 src[:dst[:ro]]，dst 省略时同 src；src 须在每台主机上存在', area('mounts', 4))}
-    ${field('Entrypoint', '全部容器就绪后在 head 上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', fsWrap(area('entrypoint', 16)))}
+    ${field('入口脚本', '全部容器就绪后在主节点上用 bash 执行，stdout/stderr 记录到任务输出；留空则只拉起容器', fsWrap(area('entrypoint', 16)))}
     ${field('安装 sshd 用的代理', '可选，如 http://proxy:8888；镜像里没有 sshd 时 apt 走这个代理，只在安装时生效，不进容器环境变量', `<input name="proxy" class="mono" spellcheck="false" placeholder="不填则直连" value="${esc(cfg.proxy || '')}">`)}
     ${field('docker run 额外参数', '已固定 --gpus all --network host --ipc private --privileged；/dev/shm 大小用 --shm-size 指定，不写则只有 docker 默认的 64MB', `<input name="docker_args" class="mono" spellcheck="false" value="${esc(cfg.docker_args)}">`)}
     <div class="form-a"><a class="btn ghost" href="#">取消</a><button class="primary" type="submit">提交</button></div>
@@ -154,7 +154,7 @@ async function showForm(fromId){
       return `<div class="pick-g"><span class="pick-gn">${esc(g || '未分组')}</span>${vis.map(h => {
       const i = picked.indexOf(h);
       return `<button type="button" class="chip${i >= 0 ? ' on' : ''}${i === 0 ? ' head' : ''}" data-h="${esc(h)}" aria-pressed="${i >= 0}"${disabled[h] ? ` title="已禁用：${esc(disabled[h])}"` : ''}>
-        ${i >= 0 ? `<b>${i + 1}</b>` : ''}${esc(h)}${i === 0 ? '<span class="badge ok">head</span>' : ''}${loadHTML(load.get(h))}${disabled[h] ? '<span class="badge hot">禁用</span>' : ''}</button>`;
+        ${i >= 0 ? `<b>${i + 1}</b>` : ''}${esc(h)}${i === 0 ? '<span class="badge ok">主节点</span>' : ''}${loadHTML(load.get(h))}${disabled[h] ? '<span class="badge hot">禁用</span>' : ''}</button>`;
       }).join('')}</div>`;
     }).join('') || '<div class="sub">还没有主机，先在监控页添加</div>';
   };
@@ -265,18 +265,18 @@ function taskHead(t, cfgOpen){
       <div><span>节点数量</span><b>${t.config.nodes ?? t.config.hosts.length}</b></div>
       <div class="wide"><span>容器名</span><b>${esc(t.container)}${t.containers_up ? '' : ' <small>(已清理)</small>'}${copyBtn('container')}</b></div>
       <div class="wide"><span>镜像</span><b>${esc(t.config.image)}${copyBtn('image')}</b></div>
-      <div><span>创建</span><b>${fmtTime(t.created)}</b></div><div><span>entrypoint 启动</span><b>${fmtTime(t.started)}</b></div>
+      <div><span>创建</span><b>${fmtTime(t.created)}</b></div><div><span>入口脚本启动</span><b>${fmtTime(t.started)}</b></div>
       <div><span>结束</span><b>${fmtTime(t.ended)}</b></div><div><span>运行时长</span><b id="runFor"></b></div>
       <div class="wide"><span>备注</span><b class="edit" data-act="note" title="点击修改备注">${t.note ? esc(t.note) : '—'}</b></div>
     </div>
     <table class="tbl panel nodes"><thead><tr><th>#</th><th>主机</th><th>${esc(t.config.ifname)} IP</th><th>GPU</th><th>状态</th></tr></thead><tbody>
-      ${t.nodes.map((n, i) => `<tr><td>${i + 1}${i === 0 ? ' <span class="badge ok">head</span>' : ''}</td><td>${esc(n.host)}</td>
+      ${t.nodes.map((n, i) => `<tr><td>${i + 1}${i === 0 ? ' <span class="badge ok">主节点</span>' : ''}</td><td>${esc(n.host)}</td>
         <td class="mono">${esc(n.ip || '--')}</td><td>${n.gpus ?? '--'}</td><td>${esc(n.state)}</td></tr>`).join('')}
     </tbody></table>
     <details id="cfg" class="panel"${cfgOpen ? ' open' : ''}><summary>配置</summary>
       ${env.length ? `<div class="cfg-l">环境变量</div>${miniTable(['KEY', 'VALUE'], env)}` : ''}
       ${mounts.length ? `<div class="cfg-l">挂载</div>${miniTable(['主机路径', '容器路径', ''], mounts)}` : ''}
-      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · head', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">Entrypoint ${copyBtn('entrypoint')}</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
+      ${pre('docker run 参数', t.docker_run || t.config.docker_args)}${pre('安装 sshd 用的代理', t.config.proxy || '')}${pre('端口占用 · 主节点', t.config.ports_head || '')}${pre('端口占用 · 普通节点', t.config.ports_nodes || '')}${t.config.entrypoint.trim() ? `<div class="cfg-l">入口脚本 ${copyBtn('entrypoint')}</div>${fsWrap(`<pre>${esc(t.config.entrypoint)}</pre>`, ' id="epWrap"')}` : ''}
     </details>`;
 }
 
@@ -286,18 +286,18 @@ async function showTask(id){
   let offset = 0, tailMode = false, gen = 0, autoWhich = true;   // 自动选的页签在 entrypoint 起来后切到输出, 手动点过就不再切
   $('#view').innerHTML = `<div id="taskHead"></div>
     <div class="logbox"><div class="log-h"><div class="seg" id="logSeg">
-      <button type="button" data-w="output">entrypoint 输出</button><button type="button" data-w="launch">启动日志</button></div>
+      <button type="button" data-w="output">入口脚本输出</button><button type="button" data-w="launch">启动日志</button></div>
       <div class="seg" id="logLvl" title="详细：额外显示每条远端命令、实时 stderr、退出码与耗时">
         <button type="button" data-l="info" class="on">简要</button><button type="button" data-l="debug">详细</button></div>
       <span id="logCap" class="log-cap" hidden>日志超过 1 MB，只显示开头部分 <button type="button" class="btn">跳到末尾并跟随</button></span>
       <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="logCnt"></span><span class="seg mini" id="logFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
-      <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="路径，目录或文件" title="在所选视角（容器或 head 主机）里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
+      <form id="rForm" class="rpath"><input class="inp mono" name="p" spellcheck="false" placeholder="路径，目录或文件" title="在所选视角（容器或主节点宿主机）里列出该目录下的文件，点文件名实时跟随（类似 tail -f）">
       <button class="btn" type="submit">列出</button></form><span class="sub" id="rInfo"></span></div>
       <div id="rFiles" class="rfiles"></div>
       <div class="log-h rctl" id="rCtl" hidden>
-        <span class="seg mini" id="rWhere" title="容器：head 容器内的文件（需容器还在）；主机：head 宿主机上的文件（容器清理后也可看，如共享存储上的日志）"><button type="button" data-m="container" class="on">容器</button><button type="button" data-m="host">主机</button></span>
+        <span class="seg mini" id="rWhere" title="容器：主节点容器内的文件（需容器还在）；主机：主节点宿主机上的文件（容器清理后也可看，如共享存储上的日志）"><button type="button" data-m="container" class="on">容器</button><button type="button" data-m="host">主机</button></span>
         <span class="seg mini" id="rMode" title="末尾：只加载最后 64KB 并跟随；全量：从文件开头加载整个文件后继续跟随，适合搜索启动早期的日志"><button type="button" data-m="tail" class="on">末尾</button><button type="button" data-m="full">全量</button></span>
         <span class="log-filter"><input id="rFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="rCnt"></span><span class="seg mini" id="rFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span>
       </div>
@@ -424,15 +424,15 @@ async function showTask(id){
   remoteLog(id, () => t);
 }
 
-// 实时日志面板: 列出 head 容器里某目录的文件, 点一个就每 2 秒增量读一次, 类似 tail -f
+// 实时日志面板: 列出主节点容器里某目录的文件, 点一个就每 2 秒增量读一次, 类似 tail -f
 function remoteLog(id, task){
   const form = $('#rForm'), info = $('#rInfo'), list = $('#rFiles'), out = $('#rLog');
   const lf = lineFilter(out, $('#rFilter'), $('#rCnt'), $('#rFseg'), Infinity);   // 全量加载, 重画过滤时不丢前文
-  // 视角 (容器/head 主机) 和目录都存浏览器, 全局共享, 不按任务分
+  // 视角 (容器/主节点宿主机) 和目录都存浏览器, 全局共享, 不按任务分
   let where = localStorage.getItem('gpumon.rwhere') || 'container';
   form.p.value = localStorage.getItem('gpumon.rpath') || (where === 'host' ? '/mnt/ceph/workspace/ycp/logs' : '/logs');
   const whereDD = segControl($('#rWhere'), [{value: 'container', label: '容器'}, {value: 'host', label: '主机'}],
-    {value: where, title: '容器：head 容器内的文件；主机：head 宿主机上的文件',
+    {value: where, title: '容器：主节点容器内的文件；主机：主节点宿主机上的文件',
      onChange: v => { where = v; localStorage.setItem('gpumon.rwhere', v); form.requestSubmit(); }});
   whereDD.set(where, true);
   let gen = 0, timer = null;
