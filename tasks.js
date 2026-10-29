@@ -449,7 +449,6 @@ function remoteLog(id, task){
       for (let more = true; more;){
         const r = await api(`/api/tasks/tail?id=${id}&path=${encodeURIComponent(path)}&offset=${offset}&where=${where}`);
         if (!alive(my)) return;
-        $('#rCtl').hidden = false;   // 首批内容取回后才显示 末尾/全量 与过滤
         if (r.reset) lf.reset();
         if (r.text) lf.emit(r.text);
         offset = r.offset; more = r.more;
@@ -466,7 +465,7 @@ function remoteLog(id, task){
     cur = {path, fromStart};
     info.textContent = fromStart ? '全量加载中…' : '';
     $('#rMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', (b.dataset.m === 'full') === fromStart));
-    $('#rWrap').hidden = false; lf.reset();   // 控制行 (rCtl) 等首批内容取回再显示
+    $('#rWrap').hidden = false; $('#rCtl').hidden = false; lf.reset();   // 内容框和控制行同时出现
     list.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', join(form.p.value.trim(), c.dataset.f) === path));
     follow(path, my, fromStart ? 0 : -1, fromStart);
   }
