@@ -488,7 +488,7 @@ def _remove_containers(t):
         _ssh(h, _bash(f"docker rm -f {name} >/dev/null 2>&1; "
                       f"if docker inspect {name} >/dev/null 2>&1; then "
                       f"echo \"容器仍存在:\"; docker inspect -f '{{{{.State.Status}}}} exit={{{{.State.ExitCode}}}}' {name}; exit 1; fi"),
-             timeout=60)
+             timeout=300)   # 大 GPU 容器的清理可能要几分钟, 别按普通命令的 60s 掐
     errs = []
     with ThreadPoolExecutor(len(t["config"]["hosts"])) as ex:
         for h, f in [(h, ex.submit(rm, h)) for h in t["config"]["hosts"]]:

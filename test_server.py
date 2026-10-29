@@ -184,7 +184,7 @@ class ClearHostTest(unittest.TestCase):
                 [], 0, stdout='{"ok": true, "killed": [101]}')) as run:
             self.assertTrue(server.clear_host('test-host')['ok'])
             self.assertEqual(run.call_args.args[0][-3:], ['--', 'test-host', server.CLEAR_CMD])
-            self.assertEqual(run.call_args.kwargs['timeout'], 240)
+            self.assertEqual(run.call_args.kwargs['timeout'], 480)
         for response in (CompletedProcess([], 1, stdout='', stderr='denied'),
                          CompletedProcess([], 0, stdout='invalid')):
             with patch.object(server.subprocess, 'run', return_value=response):

@@ -410,7 +410,7 @@ def query_group(group=None, brief=False):
 def clear_host(host):
     try:
         proc = subprocess.run(["ssh", *SSH_OPTS, "--", host, CLEAR_CMD],
-                              capture_output=True, text=True, timeout=240)
+                              capture_output=True, text=True, timeout=480)
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "清空查询超时，部分任务可能已终止，请刷新确认"}
     except FileNotFoundError:
