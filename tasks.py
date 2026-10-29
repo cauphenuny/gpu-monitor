@@ -21,7 +21,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-TASKS_DIR = Path(__file__).resolve().parent / "tasks"
+# 数据目录默认与代码同目录; 经 GPUMON_STATE_DIR 环境变量可与代码目录分离
+# (见 server.py), 目录随首个任务的创建自动建立。
+TASKS_DIR = (Path(os.environ["GPUMON_STATE_DIR"]).expanduser().resolve()
+             if os.environ.get("GPUMON_STATE_DIR")
+             else Path(__file__).resolve().parent) / "tasks"
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15",
             "-o", "StrictHostKeyChecking=accept-new",
             # OpenSSH 10.1+ 对未升级的服务端打 post-quantum 警告, 会混进报错; 旧客户端不认识该选项, 用 IgnoreUnknown 兜住
