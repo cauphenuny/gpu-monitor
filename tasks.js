@@ -1,7 +1,8 @@
 const STATUS = {launching: ['启动中', 'warn'], running: ['运行中', 'ok'], succeeded: ['已完成', 'done'],
   failed: ['失败', 'hot'], stopped: ['已停止', 'muted']};
 const ACTIVE = ['launching', 'running'];
-const LOG_HEAD = 1024 * 1024;   // 默认只看日志开头这么多字节, 超出的点「跳到末尾」再看
+const LOG_HEAD = 1024 * 1024;   // 启动日志默认只看开头这么多字节, 超出的点「跳到末尾」再看
+const OUT_HEAD = 256 * 1024;    // 入口脚本输出只显示开头 256KB, 后面的不看
 const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 'entrypoint', 'docker_args', 'proxy', 'ports_head', 'ports_nodes'];   // 导入/导出剪贴板的字段, 不含主机
 const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', mounts: '', entrypoint: '', proxy: '',
   docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864', ports_head: '', ports_nodes: ''};
@@ -289,7 +290,7 @@ async function showTask(id){
       <button type="button" data-w="output">入口脚本输出</button><button type="button" data-w="launch">启动日志</button></div>
       <div class="seg" id="logLvl" title="详细：额外显示每条远端命令、实时 stderr、退出码与耗时">
         <button type="button" data-l="info" class="on">简要</button><button type="button" data-l="debug">详细</button></div>
-      <span id="logCap" class="log-cap" hidden>日志超过 1 MB，只显示开头部分 <button type="button" class="btn">跳到末尾并跟随</button></span>
+      <span id="logCap" class="log-cap" hidden><span id="capMsg">日志超过 1 MB，只显示开头部分</span> <button type="button" class="btn">跳到末尾并跟随</button></span>
       <span class="log-filter"><input id="logFilter" class="inp mono" spellcheck="false" autocomplete="off" placeholder="过滤，子串匹配" title="文本：子串匹配（可含空格，忽略大小写）；正则：JavaScript 正则（大小写敏感）"><span class="sub" id="logCnt"></span><span class="seg mini" id="logFseg"><button type="button" data-m="text" class="on">文本</button><button type="button" data-m="regex">正则</button></span></span></div>
       ${fsWrap('<pre id="log" class="log panel"></pre>')}</div>
     <div class="logbox" id="rbox"><div class="log-h"><span class="sec-t">实时日志</span>
@@ -334,16 +335,19 @@ async function showTask(id){
         resetLog('output');
       }
       draw();
-      for (let more = true; more && (tailMode || offset < LOG_HEAD);){
-        const r = await api(`/api/tasks/log?id=${id}&which=${which}&offset=${offset}${debug ? '&level=debug' : ''}`);
+      const capBytes = which === 'output' ? OUT_HEAD : LOG_HEAD;   // 入口脚本输出只保留开头 256KB, 不提供跳末尾
+      for (let more = true; more && (tailMode || offset < capBytes);){
+        const r = await api(`/api/tasks/log?id=${id}&which=${which}&offset=${offset}${tailMode ? '' : `&limit=${capBytes - offset}`}${debug ? '&level=debug' : ''}`);
         if (my !== gen) return;
         if (r.text) lf.emit(r.text);
         offset = r.offset;
         more = r.more;
       }
-      const capped = !tailMode && offset >= LOG_HEAD;
+      const capped = !tailMode && offset >= capBytes;
       if (capped && cap.hidden) pre.scrollTop = 0;   // 刚截断: 只保留开头, 就停在开头
       cap.hidden = !capped;
+      cap.querySelector('#capMsg').textContent = which === 'output' ? '只显示入口脚本输出的前 256 KB' : '日志超过 1 MB，只显示开头部分';
+      cap.querySelector('button').style.display = which === 'output' ? 'none' : '';
     }catch(e){
       if (my !== gen) return;
     }
@@ -445,6 +449,7 @@ function remoteLog(id, task){
       for (let more = true; more;){
         const r = await api(`/api/tasks/tail?id=${id}&path=${encodeURIComponent(path)}&offset=${offset}&where=${where}`);
         if (!alive(my)) return;
+        $('#rCtl').hidden = false;   // 首批内容取回后才显示 末尾/全量 与过滤
         if (r.reset) lf.reset();
         if (r.text) lf.emit(r.text);
         offset = r.offset; more = r.more;
@@ -461,7 +466,7 @@ function remoteLog(id, task){
     cur = {path, fromStart};
     info.textContent = fromStart ? '全量加载中…' : '';
     $('#rMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', (b.dataset.m === 'full') === fromStart));
-    $('#rWrap').hidden = false; $('#rCtl').hidden = false; lf.reset();
+    $('#rWrap').hidden = false; lf.reset();   // 控制行 (rCtl) 等首批内容取回再显示
     list.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', join(form.p.value.trim(), c.dataset.f) === path));
     follow(path, my, fromStart ? 0 : -1, fromStart);
   }

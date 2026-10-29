@@ -367,8 +367,9 @@ def _clip(data, start, size, tail):
     return data, start
 
 
-def read_log(tid, which, offset, debug=False):
+def read_log(tid, which, offset, debug=False, limit=None):
     """从 offset 字节起读日志; offset<0 表示只读最后 LOG_TAIL 字节. 按整行切, 不截断多字节字符.
+    limit 可限定本次最多读多少字节 (页面用它把入口脚本输出精确截在前 256KB).
     启动日志默认滤掉 DEBUG 行 (每条远端命令的 trace), debug=True 才返回; offset 仍按文件字节算."""
     p = _dir(tid) / ("output.log" if which == "output" else "launch.log")
     try:
@@ -376,7 +377,10 @@ def read_log(tid, which, offset, debug=False):
             size = os.fstat(f.fileno()).st_size
             start = max(0, size - LOG_TAIL) if offset < 0 else min(offset, size)
             f.seek(start)
-            data = f.read(min(LOG_CHUNK, size - start))
+            n = min(LOG_CHUNK, size - start)
+            if limit is not None:
+                n = min(n, max(0, limit))
+            data = f.read(n)
     except FileNotFoundError:
         return {"text": "", "offset": max(offset, 0), "more": False}
     data, start = _clip(data, start, size, offset < 0)

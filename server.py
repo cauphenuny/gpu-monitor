@@ -525,7 +525,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 offset = int((qs.get("offset") or ["-1"])[0])
                 self._json(tasks.read_log((qs.get("id") or [""])[0], (qs.get("which") or [""])[0], offset,
-                                          (qs.get("level") or [""])[0] == "debug"))
+                                          (qs.get("level") or [""])[0] == "debug",
+                                          int((qs.get("limit") or ["0"])[0]) or None))
             except ValueError:
                 self._json({"error": "offset 无效"}, 400)
             except tasks.TaskError as e:
