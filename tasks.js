@@ -7,7 +7,7 @@ const JSON_KEYS = ['name', 'note', 'image', 'ifname', 'nodes', 'env', 'mounts', 
 const DEFAULTS = {image: '', ifname: 'bond0', hosts: [], nodes: 2, env: '', mounts: '', entrypoint: '', proxy: '',
   docker_args: '--shm-size 1500g --memory 1780g --ulimit stack=67108864:67108864', ports_head: '', ports_nodes: '', sshd_debs: ''};
 let pollTimer = null;
-let clusterFilter = null;   // 顶栏集群筛选下拉, 跨轮询复用
+const clusterFilter = {}, creatorFilter = {};   // 两个筛选 seg 的实例, 跨轮询复用 (.sel 懒建)
 const seenTasks = new Set();   // 首次出现的任务行才播入场动画, 轮询重绘不动 (同监控页 seenCards)
 let reanimList = false;   // 从详情/表单返回列表时整体重播一次
 let lastRoute = '';
@@ -76,6 +76,7 @@ async function route(){
   const h = decodeURIComponent(location.hash.slice(1));
   if (!h && lastRoute) reanimList = true;   // 返回列表: 行重新入场一次
   lastRoute = h;
+  $('#taskFilters').hidden = !!h;   // 筛选条只在列表页显示
   try{
     if (!h) await showList();
     else if (h === 'new' || h.startsWith('new/')) await showForm(h.slice(4));
@@ -85,19 +86,38 @@ async function route(){
   }
 }
 
+// 搜索: 空格分隔多个词, 全部命中才算; 覆盖名称/ID/创建者/备注/镜像/集群/主机/状态, 忽略大小写
+function taskMatches(t, terms){
+  if (!terms.length) return true;
+  const hay = [t.name, t.id, t.creator, t.note, t.config.image, t.config.cluster,
+               STATUS[t.status]?.[0], ...t.config.hosts].filter(Boolean).join(' ').toLowerCase();
+  return terms.every(x => hay.includes(x));
+}
+
 async function showList(){
   const [{tasks}, {hosts: entries}] = await Promise.all([api('/api/tasks'), api('/api/hosts')]);
   if (location.hash.slice(1)) return;
+  const pick = (wrap, items, key, store) => {   // 集群/创建者两个筛选 seg 同一套: 选中值记忆在浏览器
+    const sel = store.sel ??= segControl(wrap, items, {
+      onChange: v => { localStorage.setItem(key, v); reanimList = true; showList(); },
+    });
+    const cur = localStorage.getItem(key) ?? '__all';
+    sel.setOptions(items);
+    sel.set(items.some(i => i.value === cur) ? cur : '__all', true);   // 轮询刷新不重新触发筛选
+    return sel;
+  };
   const clusters = [...new Set([...entries.map(e => e.group), ...tasks.map(t => t.config.cluster)])].filter(c => c).sort();
-  const items = [{value: '__all', label: '全部集群'}, ...clusters.map(c => ({value: c, label: c}))];
-  const sel = clusterFilter ??= segControl($('#clusterSel'), items, {
-    title: '按集群（主机分组）筛选任务列表',
-    onChange: v => { localStorage.setItem('gpumon.clusterFilter', v); reanimList = true; showList(); },
-  });
-  const cur = localStorage.getItem('gpumon.clusterFilter') ?? '__all';
-  sel.setOptions(items);
-  sel.set(items.some(i => i.value === cur) ? cur : '__all', true);   // 轮询刷新不重新触发筛选
-  const shown = sel.value === '__all' ? tasks : tasks.filter(t => t.config.cluster === sel.value);
+  const cSel = pick($('#clusterSel'), [{value: '__all', label: '全部'}, ...clusters.map(c => ({value: c, label: c}))],
+    'gpumon.clusterFilter', clusterFilter);
+  const creators = [...new Set(tasks.map(t => t.creator).filter(Boolean))].sort();
+  const uSel = pick($('#creatorSel'), [{value: '__all', label: '全部'}, ...creators.map(c => ({value: c, label: c}))],
+    'gpumon.creatorFilter', creatorFilter);
+  const q = ($('#taskSearch').value || '').trim().toLowerCase();
+  const terms = q ? q.split(/\s+/) : [];
+  const shown = tasks.filter(t => (cSel.value === '__all' || t.config.cluster === cSel.value)
+    && (uSel.value === '__all' || t.creator === uSel.value) && taskMatches(t, terms));
+  const filtered = shown.length !== tasks.length;
+  $('#filterCnt').textContent = filtered ? `${shown.length} / ${tasks.length}` : '';
   const y = window.scrollY;   // innerHTML 整体替换会让文档高度瞬间塌掉, 浏览器把滚动钳到顶; 重绘后恢复
   $('#view').innerHTML = shown.length ? `<table class="tbl panel"><thead><tr><th>名称</th><th>状态</th><th>主机</th>
     <th>创建时间</th><th>运行时长</th><th></th></tr></thead><tbody>${shown.map((t, i) => `<tr${seenTasks.has(t.id) && !reanimList ? '' : ` class="in" style="--i:${Math.min(i, 12)}"`}>
@@ -105,7 +125,7 @@ async function showList(){
       <td>${badge(t)}</td><td class="hosts">${t.config.hosts.map(esc).join('<br>')}</td>
       <td>${fmtTime(t.created)}</td><td>${runFor(t)}</td>
       <td class="acts"><a class="btn sm" href="#new/${t.id}">复制</a></td></tr>`).join('')}</tbody></table>`
-    : `<div class="hint">还没有任务${sel.value === '__all' ? '' : `（集群 ${esc(sel.value)}）`}，点右上角「新建任务」</div>`;
+    : `<div class="hint">${tasks.length ? '没有匹配当前筛选的任务' : '还没有任务，点右上角「新建任务」'}</div>`;
   shown.forEach(t => seenTasks.add(t.id));
   reanimList = false;
   window.scrollTo(0, y);
@@ -535,6 +555,16 @@ function settingsDialog(prompt = false){
     dlg.querySelector('[name=creator]').focus();
   });
 }
+// 搜索框: 防抖后重画列表 (不重播入场动画, 免得打字时一直抖); Esc 清空
+let searchTimer;
+$('#taskSearch').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { if (!location.hash.slice(1)) showList(); }, 200);
+});
+$('#taskSearch').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && e.target.value){ e.stopPropagation(); e.target.value = ''; showList(); }
+});
+
 $('#settingsBtn').addEventListener('click', async () => {
   const s = await settingsDialog();
   if (s) saveSettings(s);

@@ -14,10 +14,17 @@
   <button id="updateBtn" type="button" title="在服务目录执行 git pull 并重启服务">更新</button>
   <nav class="nav"><a href="/">监控</a><a href="/tasks" class="on">任务</a></nav>
   <div class="spacer"></div>
-  <div id="clusterSel" title="按集群（主机分组）筛选任务列表"></div>
   <a class="btn" href="#new">＋ 新建任务</a>
   <button id="settingsBtn" type="button">设置</button>
 </header>
+<!-- 筛选条放在 #view 外: 列表每 5 秒重绘 innerHTML, 放里面会清掉输入框和焦点 -->
+<div id="taskFilters" class="filters" hidden>
+  <input id="taskSearch" class="inp" type="search" autocomplete="off" placeholder="搜索 名称 / ID / 备注 / 镜像 / 主机"
+         title="空格分隔多个词, 全部命中才显示 (名称、ID、创建者、备注、镜像、集群、主机、状态; 忽略大小写)。Esc 清空">
+  <span class="flabel">集群</span><span id="clusterSel"></span>
+  <span class="flabel">创建者</span><span id="creatorSel"></span>
+  <span class="sub" id="filterCnt"></span>
+</div>
 <main id="view" class="tasks"></main>
 
 <script src="/common.js"></script>
