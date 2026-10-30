@@ -644,9 +644,10 @@ echo "$ip $(nvidia-smi -L | grep -c ^GPU)"
             inner = ("apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
                      "--download-only --no-install-recommends openssh-server openssh-client "
                      "&& cp -n /var/cache/apt/archives/*.deb /debs/ && ls /debs/openssh-server_*.deb")
-            _ssh(h, shlex.join(["docker", "run", "--rm", *pe, "-v", f"{debs}:/debs", cfg["image"], "bash", "-c", inner])
-                         + f" || ls {d}/openssh-server_*.deb",   # 已缓存时容器步骤可跳过 (上次成功过即可)
-                 timeout=900)
+            # 缓存先查主机目录, 命中就不联网; 原顺序是先下载失败才回退, 断网时要白等 apt 超时
+            _ssh(h, f"ls {d}/openssh-server_*.deb >/dev/null 2>&1 || "
+                        + shlex.join(["docker", "run", "--rm", *pe, "-v", f"{debs}:/debs", cfg["image"], "bash", "-c", inner]),
+                  timeout=900)
 
         debs = cfg.get("sshd_debs", "").strip()
         if debs:

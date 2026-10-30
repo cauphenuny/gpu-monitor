@@ -245,6 +245,14 @@ class StoreTest(unittest.TestCase):
         self.assertGreater(max(rm), max(runs))  # 晚到的容器被再删一遍
         self.assertFalse(any("entrypoint.sh" in c[1] for c in calls))
 
+    def test_prep_debs_checks_cache_before_download(self):
+        calls, ssh = self.fake_ssh()
+        with patch.object(tasks, "_ssh", ssh), patch.object(tasks.subprocess, "Popen", self.popen(b"")):
+            tasks.create("job", "", {**CFG, "sshd_debs": "/root/sshd-debs"}, "gpumon")
+        cmd = next(c for _, c in calls if "--download-only" in c)
+        # 缓存检查在前: 主机目录已有 deb 就不会碰网络 (原实现先下载、失败才回退)
+        self.assertLess(cmd.index("openssh-server_*.deb"), cmd.index("docker run"))
+
     def test_launch_failure_keeps_error_and_skips_entrypoint(self):
         calls, ssh = self.fake_ssh(fail="docker pull")
         with patch.object(tasks, "_ssh", ssh):
