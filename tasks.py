@@ -635,19 +635,18 @@ echo "$ip $(nvidia-smi -L | grep -c ^GPU)"
         image = shlex.quote(cfg["image"])
 
         def prep_debs(h):
-            """主机上缓存 openssh deb (含依赖); 已有 openssh-server*.deb 就跳过, 全程只在第一次联网."""
+            """主机上缓存 openssh deb (含依赖). 宿主机常是非 root 且 Docker Hub 不通,
+            所以用任务自己的镜像起一次性容器下载 (容器内是 root, 网络与目标容器一致), 已缓存则跳过."""
             d = shlex.quote(debs)
             proxy = cfg.get("proxy", "").strip()
-            p = shlex.quote(proxy if "://" in proxy or not proxy else f"http://{proxy}")
-            export = f"export http_proxy={p} https_proxy={p};" if proxy else ""
-            _ssh(h, _bash(f"""set -e
-mkdir -p {d}
-if ls {d}/openssh-server_*.deb >/dev/null 2>&1; then echo "[prep] sshd 离线包已缓存, 跳过下载"; exit 0; fi
-echo "[prep] 首次缓存 openssh deb (含依赖) 到 {d}"
-{export} apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --download-only --no-install-recommends openssh-server openssh-client
-cp -n /var/cache/apt/archives/*.deb {d}/ 2>/dev/null || true
-ls {d}/openssh-server_*.deb >/dev/null 2>&1 || {{ echo "下载后仍未找到 openssh-server deb" >&2; exit 1; }}"""), timeout=600)
+            p = proxy if "://" in proxy or not proxy else f"http://{proxy}"
+            pe = ["-e", f"http_proxy={p}", "-e", f"https_proxy={p}"] if proxy else []
+            inner = ("apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
+                     "--download-only --no-install-recommends openssh-server openssh-client "
+                     "&& cp -n /var/cache/apt/archives/*.deb /debs/ && ls /debs/openssh-server_*.deb")
+            _ssh(h, shlex.join(["docker", "run", "--rm", *pe, "-v", f"{debs}:/debs", cfg["image"], "bash", "-c", inner])
+                         + f" || ls {d}/openssh-server_*.deb",   # 已缓存时容器步骤可跳过 (上次成功过即可)
+                 timeout=900)
 
         debs = cfg.get("sshd_debs", "").strip()
         if debs:
