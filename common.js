@@ -23,7 +23,7 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
     dlg.className = 'dlg';
     dlg.innerHTML = `<div class="dlg-t">${esc(title)}</div>
       ${desc ? `<div class="dlg-d">${esc(desc).replace(/\n/g, '<br>')}</div>` : ''}
-      ${input ? `<input class="dlg-i" name="value" value="${esc(value)}" spellcheck="false" autocomplete="off">` : ''}
+      ${input === 'multiline' ? `<textarea class="dlg-i" name="value" rows="8" spellcheck="false"></textarea>` : input ? `<input class="dlg-i" name="value" value="${esc(value)}" spellcheck="false" autocomplete="off">` : ''}
       <div class="dlg-a">${cancel ? '<button type="button" class="ghost" data-no>取消</button>' : ''}
         <button type="button" class="${danger ? 'danger' : 'primary'}" data-yes>${esc(ok)}</button></div>`;
     const done = v => {
@@ -39,7 +39,7 @@ function modal({title, desc = '', input = false, value = '', ok = '确定', canc
     document.body.appendChild(dlg);
     dlg.showModal();
     const i = dlg.querySelector('.dlg-i');
-    if (i){ i.focus(); i.select(); i.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); done(val()); } }); }
+    if (i){ i.focus(); i.select(); if (input !== 'multiline') i.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); done(val()); } }); }
     else dlg.querySelector('[data-yes]').focus();
   });
 }
@@ -181,3 +181,23 @@ globalThis.document?.getElementById?.('updateBtn')?.addEventListener('click', as
 const notify = (title, desc = '') => document?.createElement
   ? modal({title, desc, ok: '知道了', cancel: false})
   : (alert(title + (desc ? '\n' + desc : '')), Promise.resolve());
+
+// 剪贴板工具: navigator.clipboard 仅存在于安全上下文 (HTTPS/localhost);
+// 纯 http 页面下复制回退 execCommand('copy') (已废弃但各浏览器仍可用),
+// 读取没有任何替代 API, 弹多行输入框让用户手动粘贴。
+async function copyText(text){
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  try { if (!document.execCommand('copy')) throw new Error('浏览器拒绝了复制请求'); }
+  finally { ta.remove(); }
+}
+async function pasteText(){
+  if (navigator.clipboard?.readText) return navigator.clipboard.readText();
+  const v = await modal({title: '粘贴 JSON', desc: '当前为非安全上下文 (HTTP), 无法直接读取剪贴板, 请在此粘贴:', input: 'multiline', ok: '导入'});
+  if (v == null) throw new Error('已取消');
+  return v;
+}

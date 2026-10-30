@@ -193,10 +193,10 @@ async function showForm(fromId){
     if (!act) return;
     try{
       if (act === 'export'){
-        await navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(JSON_KEYS.map(k => [k, form.elements[k].value])), null, 2));
+        await copyText(JSON.stringify(Object.fromEntries(JSON_KEYS.map(k => [k, form.elements[k].value])), null, 2));
         return notify('已复制到剪贴板', '包含除主机以外的全部配置。');
       }
-      const d = JSON.parse(await navigator.clipboard.readText());
+      const d = JSON.parse(await pasteText());
       if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('剪贴板里不是 JSON 对象');
       const got = JSON_KEYS.filter(k => typeof d[k] === 'string');
       if (!got.length) throw new Error('没有可导入的字段（' + JSON_KEYS.join(', ') + '）');
@@ -378,7 +378,7 @@ async function showTask(id){
     if (b){
       const val = {id, container: t.container, image: t.config.image, entrypoint: t.config.entrypoint}[b.dataset.copy];
       try{
-        await navigator.clipboard.writeText(val);
+        await copyText(val);
         b.textContent = '✓';
         setTimeout(() => { b.textContent = '⧉'; }, 900);
       }catch(err){ notify('复制失败', err.message); }
